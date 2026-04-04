@@ -2,7 +2,7 @@
 
 An agent-based CLI that delivers expert-level UX/UI design critique, developer handoff specs, and accessibility audits - powered by deterministic analysis, multi-agent architecture, and a knowledge library of 39 design principles across 10 domains.
 
-Outperforms raw Claude Opus and Sonnet sessions on structured design critique benchmarks (86% vs 71% Opus / 85% Sonnet) by combining programmatic analysis with LLM judgment.
+Outperforms raw Claude Opus and Sonnet sessions on structured design critique benchmarks (94% ensemble vs 73% Opus / 85% Sonnet) by combining deterministic analysis, multi-agent architecture, and multi-model ensemble synthesis.
 
 ## What makes this different from asking an LLM to critique a design?
 
@@ -290,7 +290,10 @@ URL/Screenshot/Description
 [Knowledge Retrieval] -- Context-aware tag matching from 39-entry library
     |
     v
-[LLM Agents] -- Single agent or 4 specialized agents in parallel
+[LLM Agents] -- Single agent, 4 specialized agents, or N-model ensemble
+    |
+    v
+[Synthesis] -- (ensemble only) Cross-model consensus analysis
     |
     v
 [Output] -- Markdown report + regression diff + history tracking
@@ -465,11 +468,15 @@ better-design-agent/
 
 Benchmarked against raw Claude Opus 4.6 and Sonnet 4.6 sessions on excalidraw.com:
 
-| Agent | Score | Specificity | Coverage | Accessibility | Design System | Unique Findings |
+| Agent | Score | Specificity | Actionability | Accessibility | Design System | Unique Findings |
 |---|---|---|---|---|---|---|
-| **design-intel (deep)** | **86%** | 100% | 100% | 100% | 100% | 100% |
-| Sonnet 4.6 (raw) | 85% | 100% | 100% | 100% | 100% | 100% |
-| Opus 4.6 (raw) | 71% | 75% | 100% | 100% | 50% | 80% |
+| **design-intel (ensemble)** | **94%** | 100% | 95% | 100% | 100% | 100% |
+| **design-intel (deep)** | **86%** | 100% | 50% | 100% | 100% | 100% |
+| Sonnet 4.6 (raw) | 85% | 100% | 50% | 100% | 100% | 100% |
+| design-intel (single) | 78% | 100% | 90% | 100% | 100% | 0% |
+| Opus 4.6 (raw) | 73% | 75% | 50% | 100% | 50% | 100% |
+
+The ensemble mode scores highest because each model's full output is preserved (no information loss), and the synthesis adds consensus analysis on top. Different models catch different things - the ensemble captures all of them.
 
 The benchmark measures seven dimensions:
 
@@ -497,6 +504,7 @@ python -m tests.benchmark_critique
 - [x] **Batch 4** - Real interaction testing (keyboard, forms, empty states, responsive)
 - [x] **Batch 5** - Component-level detection and scoring
 - [x] **Extra** - Stage-aware critique, device presets, developer handoff, image compression
+- [x] **Ensemble** - Multi-model parallel analysis with consensus synthesis (94% benchmark)
 - [ ] **Next** - Style Guide Generator + Extractor, vector search (ChromaDB)
 - [ ] **Future** - Figma input support, autonomous knowledge curation, API server mode
 
