@@ -488,10 +488,10 @@ async def _capture_page(page, output_path: str) -> tuple[str, dict]:
     return text, dom_data
 
 
-async def _capture(url: str, output_path: str, viewport_width: int = 1440) -> tuple[str, dict]:
+async def _capture(url: str, output_path: str, viewport_width: int = 1440, viewport_height: int = 900) -> tuple[str, dict]:
     async with async_playwright() as p:
         browser = await p.chromium.launch()
-        page = await browser.new_page(viewport={"width": viewport_width, "height": 900})
+        page = await browser.new_page(viewport={"width": viewport_width, "height": viewport_height})
         await page.goto(url, wait_until="networkidle", timeout=30000)
         text, dom_data = await _capture_page(page, output_path)
         await browser.close()
@@ -502,6 +502,7 @@ async def _crawl_app(
     url: str,
     output_dir: str,
     viewport_width: int = 1440,
+    viewport_height: int = 900,
     max_pages: int = 10,
 ) -> list[dict]:
     """Crawl an app by discovering and clicking navigation links.
@@ -521,7 +522,7 @@ async def _crawl_app(
 
     async with async_playwright() as p:
         browser = await p.chromium.launch()
-        page = await browser.new_page(viewport={"width": viewport_width, "height": 900})
+        page = await browser.new_page(viewport={"width": viewport_width, "height": viewport_height})
 
         # Capture the initial page
         await page.goto(url, wait_until="networkidle", timeout=30000)
@@ -705,13 +706,13 @@ async def _crawl_app(
     return pages_captured
 
 
-def capture_url(url: str, output_path: str = "output/screenshot.png") -> tuple[str, str, dict]:
+def capture_url(url: str, output_path: str = "output/screenshot.png", viewport_width: int = 1440, viewport_height: int = 900) -> tuple[str, str, dict]:
     """Capture a screenshot of a URL. Returns (screenshot_path, extracted_text, dom_data)."""
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    text, dom_data = asyncio.run(_capture(url, output_path))
+    text, dom_data = asyncio.run(_capture(url, output_path, viewport_width=viewport_width, viewport_height=viewport_height))
     return output_path, text, dom_data
 
 
-def crawl_app(url: str, output_dir: str = "output/pages", max_pages: int = 10) -> list[dict]:
+def crawl_app(url: str, output_dir: str = "output/pages", max_pages: int = 10, viewport_width: int = 1440, viewport_height: int = 900) -> list[dict]:
     """Crawl an app and capture multiple pages. Returns list of page capture dicts."""
-    return asyncio.run(_crawl_app(url, output_dir, max_pages=max_pages))
+    return asyncio.run(_crawl_app(url, output_dir, max_pages=max_pages, viewport_width=viewport_width, viewport_height=viewport_height))
