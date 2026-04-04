@@ -39,18 +39,26 @@ def call_llm(
     system_prompt: str,
     user_prompt: str,
     image_path: str | None = None,
+    image_paths: list[str] | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
 ) -> str:
     model = _resolve_model()
     messages = [{"role": "system", "content": system_prompt}]
 
-    user_content: list[dict] | str
+    # Collect all images
+    all_images = []
     if image_path:
-        user_content = [
-            {"type": "text", "text": user_prompt},
-            _encode_image(image_path),
-        ]
+        all_images.append(image_path)
+    if image_paths:
+        all_images.extend(image_paths)
+
+    user_content: list[dict] | str
+    if all_images:
+        user_content = [{"type": "text", "text": user_prompt}]
+        for img in all_images:
+            if Path(img).exists():
+                user_content.append(_encode_image(img))
     else:
         user_content = user_prompt
 

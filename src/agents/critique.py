@@ -57,15 +57,42 @@ vs where values are hardcoded. Flag inconsistencies between tokens and actual us
 2-3 sentence overall assessment with severity: **Critical** / **Needs Work** / **Solid**. \
 Be direct.
 
+### Score
+Rate the design out of 100 across these categories (include exact scores):
+
+| Category | Score | Max |
+|----------|-------|-----|
+| Visual Hierarchy | /15 | 15 |
+| Typography | /10 | 10 |
+| Colour & Contrast | /15 | 15 |
+| Spacing & Rhythm | /10 | 10 |
+| Layout & Composition | /10 | 10 |
+| Accessibility | /20 | 20 |
+| Interaction States | /10 | 10 |
+| Consistency | /5 | 5 |
+| Information Architecture | /5 | 5 |
+| **Total** | **/100** | **100** |
+
+Be strict. A "perfectly fine" design scores 60-70. Scores above 80 indicate genuinely \
+strong work. Scores below 40 indicate critical issues.
+
 ### Critical Issues
 Severity-ranked issues. Each:
 - **What**: Reference exact elements by CSS selector, token name, or DOM attribute
 - **Why it matters**: Impact on users, citing WCAG criteria where applicable
 - **Fix**: Concrete CSS or HTML fix, using existing token names where possible
-- **Severity**: High / Medium
+- **Severity**: 0-4 (Nielsen scale)
 
 ### Improvements
 Same format as Critical Issues.
+
+### Interaction State Audit
+You will receive state test results showing which elements have hover and focus states. \
+For each element tested:
+- Does it have a hover state? What changes? Is the change sufficient?
+- Does it have a focus state? Is it visible on the dark background?
+- Does the cursor change to pointer on hover for clickable elements?
+Flag elements missing hover, focus, or cursor changes. Reference the test data exactly.
 
 ### Accessibility Audit
 Dedicated section with sub-headings:
@@ -73,7 +100,8 @@ Dedicated section with sub-headings:
 - **Contrast**: Table of all pairs with ratios, pass/fail, token names
 - **Non-text Contrast**: UI component boundary analysis (WCAG 1.4.11)
 - **Touch Targets**: Table of violations with selectors and exact dimensions
-- **Focus Management**: Which elements have/lack focus-visible styles
+- **Focus Management**: Use the state test results to cite exactly which elements \
+have/lack focus-visible styles and what their focus styles look like
 - **Forms**: Inputs without programmatic labels
 - **Keyboard Navigation**: Skip link, tab order concerns
 
@@ -332,6 +360,51 @@ def _format_dom_data(dom_data: dict) -> str:
                 )
         sections.append("")
 
+    # Interactive state tests (hover/focus actual results)
+    state_tests = dom_data.get("state_tests", [])
+    if state_tests:
+        sections.append("### Interactive State Test Results (Hover + Focus)")
+        sections.append("Elements were hovered and focused via Playwright. Results:\n")
+
+        for st in state_tests:
+            selector = st["selector"]
+            text = st["text"]
+            has_hover = st.get("has_hover_state", False)
+            has_focus = st.get("has_focus_state", False)
+            cursor = st.get("cursor_on_hover", "auto")
+
+            status_parts = []
+            if has_hover:
+                changes = st.get("hover_changes", {})
+                change_desc = ", ".join(
+                    f"{k}: {v['from']} -> {v['to']}" for k, v in changes.items()
+                ) or "visual change detected"
+                status_parts.append(f"Hover: YES ({change_desc})")
+            else:
+                status_parts.append("Hover: **NONE**")
+
+            if has_focus:
+                changes = st.get("focus_changes", {})
+                change_desc = ", ".join(
+                    f"{k}: {v['from']} -> {v['to']}" for k, v in changes.items()
+                ) or "visual change detected"
+                status_parts.append(f"Focus: YES ({change_desc})")
+            else:
+                status_parts.append("Focus: **NONE**")
+
+            cursor_ok = cursor == "pointer" if st.get("text") else True
+            if cursor != "pointer" and st["selector"].startswith("button"):
+                status_parts.append(f"Cursor: `{cursor}` (should be `pointer`)")
+
+            sections.append(f"- `{selector}` \"{text}\" - {' | '.join(status_parts)}")
+
+        # Summary
+        no_hover = [s for s in state_tests if not s.get("has_hover_state")]
+        no_focus_st = [s for s in state_tests if not s.get("has_focus_state")]
+        sections.append(f"\n**Summary:** {len(no_hover)}/{len(state_tests)} elements missing hover, "
+                        f"{len(no_focus_st)}/{len(state_tests)} missing focus")
+        sections.append("")
+
     return "\n".join(sections)
 
 
@@ -518,41 +591,104 @@ class CritiqueAgent(BaseAgent):
         tone_instruction = CRITIQUE_TONE_VARIANTS.get(self.tone, CRITIQUE_TONE_VARIANTS["opinionated"])
         return f"{CRITIQUE_SYSTEM_PROMPT}\n\nTone: {tone_instruction}"
 
+    def get_image_paths(self, design_input: DesignInput) -> list[str]:
+        """Return screenshots from all crawled pages."""
+        if design_input.pages and len(design_input.pages) > 1:
+            return [p.image_path for p in design_input.pages if p.image_path]
+        if design_input.image_path:
+            return [design_input.image_path]
+        return []
+
+    def _detect_context_tags(self, design_input: DesignInput) -> list[str]:
+        """Analyse DOM data to select relevant knowledge tags."""
+        tags = set()
+
+        # Always include core frameworks
+        tags.update(["heuristics", "usability", "severity", "nielsen",
+                      "wcag", "accessibility", "contrast", "touch-targets",
+                      "gestalt", "visual-hierarchy", "critique"])
+
+        dom = design_input.dom_data
+        if not dom:
+            return list(tags)
+
+        # Dark theme detection
+        layout = dom.get("layout", {})
+        body_bg = layout.get("body_bg", "")
+        if body_bg and body_bg.startswith("#"):
+            # Check if background is dark (low luminance)
+            try:
+                r, g, b = int(body_bg[1:3], 16), int(body_bg[3:5], 16), int(body_bg[5:7], 16)
+                luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+                if luminance < 0.3:
+                    tags.update(["dark-mode", "colour"])
+            except (ValueError, IndexError):
+                pass
+
+        # Form detection
+        html = dom.get("html_structure", {})
+        has_forms = (
+            html.get("forms", {}).get("inputs_without_labels", [])
+            or html.get("forms", {}).get("selects_without_labels", [])
+        )
+        if has_forms:
+            tags.update(["forms", "input", "validation", "aria", "semantics"])
+
+        # Check if there are many font sizes (typography issues)
+        fonts = dom.get("fonts", {}).get("sizes", [])
+        if len(fonts) > 5:
+            tags.update(["type-scale", "typography", "readability", "hierarchy", "modular-scale"])
+
+        # Check for spacing issues
+        spacing = dom.get("spacing_values", [])
+        if len(spacing) > 10:
+            tags.update(["spacing", "whitespace", "density", "grid"])
+
+        # Check for interactive elements (interaction patterns)
+        interactive = dom.get("interactive_elements", [])
+        if interactive:
+            tags.update(["interaction", "states", "components", "microinteractions",
+                          "navigation", "patterns"])
+
+        # Check for CSS tokens
+        tokens = dom.get("css_tokens", {})
+        has_tokens = any(tokens.get(cat) for cat in tokens)
+        if has_tokens:
+            tags.update(["design-system", "design-tokens", "css-variables", "naming"])
+        else:
+            tags.update(["design-system", "design-tokens", "atomic-design"])
+
+        # Check for non-text contrast failures
+        ntc = dom.get("non_text_contrast", [])
+        ntc_failures = [n for n in ntc if not n.get("passes_3_to_1")]
+        if ntc_failures:
+            tags.update(["colour", "perception"])
+
+        # Check for semantic HTML issues
+        landmarks = html.get("landmarks", {})
+        missing_landmarks = [k for k, v in landmarks.items() if v == 0]
+        if missing_landmarks:
+            tags.update(["semantics", "screen-reader", "aria", "annotation"])
+
+        # Mobile/responsive
+        viewport_width = layout.get("viewport_width", 1440)
+        if viewport_width and viewport_width < 768:
+            tags.update(["mobile", "thumb-zone", "responsive", "platform", "ergonomics"])
+
+        # State test results
+        state_tests = dom.get("state_tests", [])
+        if state_tests:
+            no_hover = [s for s in state_tests if not s.get("has_hover_state")]
+            no_focus = [s for s in state_tests if not s.get("has_focus_state")]
+            if no_hover or no_focus:
+                tags.update(["states", "feedback", "interaction"])
+
+        return list(tags)
+
     def retrieve_knowledge(self, design_input: DesignInput) -> str:
-        """Retrieve all knowledge across critique-relevant categories."""
-        all_tags = [
-            # Accessibility
-            "contrast", "wcag", "accessibility", "colour", "aria",
-            "touch-targets", "inclusive-design", "cognitive", "coga",
-            "annotation", "documentation", "handoff", "semantics",
-            "screen-reader", "vestibular",
-            # Typography & Layout
-            "type-scale", "typography", "readability", "hierarchy",
-            "spacing", "layout", "consistency", "grid",
-            "gestalt", "visual-hierarchy", "whitespace", "density",
-            "reading-patterns", "eye-tracking",
-            # Heuristics & Methodology
-            "heuristics", "usability", "evaluation", "severity",
-            "nielsen", "shneiderman", "critique", "methodology",
-            "review", "feedback",
-            # Interaction & Patterns
-            "forms", "interaction", "navigation", "microinteractions",
-            "information-architecture", "input", "validation",
-            "states", "patterns", "components",
-            # Design Systems & References
-            "design-system", "design-tokens", "css-variables",
-            "atomic-design", "naming", "figma", "reference", "templates",
-            # Colour & Visual
-            "dark-mode", "psychology", "data-visualisation",
-            "perception", "colorbrewer",
-            # Motion
-            "motion", "animation", "reduced-motion", "transitions",
-            # Mobile & Platform
-            "mobile", "thumb-zone", "responsive", "platform",
-            "platform-conventions", "ios", "android", "ergonomics",
-            "breakpoints", "viewport", "touch",
-        ]
-        return retrieve(tags=all_tags, max_tokens=8000)
+        """Retrieve knowledge based on what's actually in the design."""
+        tags = self._detect_context_tags(design_input)
+        return retrieve(tags=tags, max_tokens=8000)
 
     def build_user_prompt(self, design_input: DesignInput, context: str = "") -> str:
         parts = []
@@ -572,9 +708,20 @@ class CritiqueAgent(BaseAgent):
             if multi_section:
                 parts.append(multi_section)
 
+            # Page image mapping
+            page_labels = [p.label for p in design_input.pages if p.image_path]
+            parts.append(
+                f"## Screenshots\n"
+                f"{len(page_labels)} page screenshots are attached in order: "
+                f"{', '.join(page_labels)}. "
+                f"Visually analyse each screenshot for issues not captured in DOM data "
+                f"(visual hierarchy, layout balance, whitespace, typography rhythm, "
+                f"empty states, loading states)."
+            )
+
             parts.append(
                 f"Critique this application across all {len(design_input.pages)} pages. "
-                f"The screenshot shows the primary page. DOM data has been extracted from all pages. "
+                f"DOM data and state test results have been extracted from all pages. "
                 f"Identify issues that are consistent across pages vs page-specific issues. "
                 f"Reference which page(s) each finding applies to."
             )
@@ -593,7 +740,7 @@ class CritiqueAgent(BaseAgent):
         elif design_input.type == InputType.TEXT:
             parts.append(f"Critique the following design based on this description:\n\n{design_input.page_text}")
 
-        if design_input.image_path:
+        if design_input.image_path and not (design_input.pages and len(design_input.pages) > 1):
             parts.append("The screenshot is attached for visual analysis.")
 
         return "\n\n".join(parts)

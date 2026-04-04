@@ -350,6 +350,125 @@ DOM_EXTRACTION_SCRIPT = """
 """
 
 
+STATE_TEST_SCRIPT = """
+(selector) => {
+    const el = document.querySelector(selector);
+    if (!el) return null;
+    const style = getComputedStyle(el);
+    return {
+        backgroundColor: style.backgroundColor,
+        color: style.color,
+        borderColor: style.borderColor,
+        outline: style.outline,
+        outlineStyle: style.outlineStyle,
+        boxShadow: style.boxShadow,
+        opacity: style.opacity,
+        cursor: style.cursor,
+        transform: style.transform,
+        textDecoration: style.textDecoration,
+    };
+}
+"""
+
+
+async def _test_interactive_states(page) -> list[dict]:
+    """Test hover and focus states on interactive elements by triggering them."""
+    results = []
+
+    # Get interactive elements with unique selectors
+    elements = await page.evaluate("""
+        () => {
+            const els = document.querySelectorAll('button, a, input, select, [role="button"], [role="tab"]');
+            const seen = new Set();
+            const targets = [];
+            for (const el of els) {
+                const rect = el.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) continue;
+                if (el.closest('[style*="display: none"]')) continue;
+
+                // Build a unique selector
+                let selector = el.tagName.toLowerCase();
+                if (el.id) selector += '#' + el.id;
+                else if (el.className) selector += '.' + el.className.toString().split(' ').filter(c => c).join('.');
+
+                if (seen.has(selector)) continue;
+                seen.add(selector);
+
+                targets.push({
+                    selector: selector,
+                    text: (el.textContent || el.placeholder || '').trim().substring(0, 30),
+                    tag: el.tagName.toLowerCase(),
+                    x: Math.round(rect.x + rect.width / 2),
+                    y: Math.round(rect.y + rect.height / 2),
+                });
+                if (targets.length >= 15) break;
+            }
+            return targets;
+        }
+    """)
+
+    for el_info in elements:
+        selector = el_info["selector"]
+        try:
+            # Capture default state
+            default_state = await page.evaluate(STATE_TEST_SCRIPT, selector)
+            if not default_state:
+                continue
+
+            # Test hover state
+            await page.hover(selector, timeout=2000)
+            await page.wait_for_timeout(100)
+            hover_state = await page.evaluate(STATE_TEST_SCRIPT, selector)
+
+            # Test focus state
+            await page.focus(selector, timeout=2000)
+            await page.wait_for_timeout(100)
+            focus_state = await page.evaluate(STATE_TEST_SCRIPT, selector)
+
+            # Compare states
+            hover_changed = hover_state and any(
+                default_state.get(k) != hover_state.get(k)
+                for k in ["backgroundColor", "color", "borderColor", "boxShadow",
+                           "opacity", "cursor", "transform", "textDecoration"]
+            )
+            focus_changed = focus_state and any(
+                default_state.get(k) != focus_state.get(k)
+                for k in ["backgroundColor", "color", "borderColor", "outline",
+                           "outlineStyle", "boxShadow"]
+            )
+
+            hover_changes = {}
+            if hover_changed and hover_state:
+                for k in ["backgroundColor", "color", "borderColor", "cursor"]:
+                    if default_state.get(k) != hover_state.get(k):
+                        hover_changes[k] = {"from": default_state[k], "to": hover_state[k]}
+
+            focus_changes = {}
+            if focus_changed and focus_state:
+                for k in ["outline", "outlineStyle", "boxShadow", "borderColor"]:
+                    if default_state.get(k) != focus_state.get(k):
+                        focus_changes[k] = {"from": default_state[k], "to": focus_state[k]}
+
+            results.append({
+                "selector": selector,
+                "text": el_info["text"],
+                "has_hover_state": hover_changed,
+                "has_focus_state": focus_changed,
+                "hover_changes": hover_changes,
+                "focus_changes": focus_changes,
+                "cursor_on_hover": hover_state.get("cursor", "auto") if hover_state else "auto",
+            })
+
+            # Reset by moving mouse away
+            await page.mouse.move(0, 0)
+            await page.evaluate("document.activeElement?.blur()")
+
+        except Exception:
+            continue
+
+    return results
+
+
 async def _capture_page(page, output_path: str) -> tuple[str, dict]:
     """Capture screenshot and extract DOM data from a single page."""
     await page.screenshot(path=output_path, full_page=True)
@@ -358,6 +477,14 @@ async def _capture_page(page, output_path: str) -> tuple[str, dict]:
         dom_data = await page.evaluate(DOM_EXTRACTION_SCRIPT)
     except Exception:
         dom_data = {}
+
+    # Test interactive states
+    try:
+        state_results = await _test_interactive_states(page)
+        dom_data["state_tests"] = state_results
+    except Exception:
+        dom_data["state_tests"] = []
+
     return text, dom_data
 
 
