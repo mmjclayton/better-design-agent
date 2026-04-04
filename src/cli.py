@@ -4,9 +4,14 @@ import typer
 from rich.console import Console
 from rich.markdown import Markdown
 
+import re
+
 from src.input.processor import process_input
 from src.agents.critique import CritiqueAgent
 from src.analysis.wcag_checker import run_wcag_check, run_wcag_check_multi
+from src.analysis.history import (
+    build_run_record, save_run, get_previous_run, compute_diff, load_history,
+)
 from src.knowledge.index import build_index
 from src.output.formatter import save_report
 
@@ -77,9 +82,40 @@ def critique(
         for p in design_input.pages:
             console.print(f"  - {p.label} ({p.url})")
 
+    # Run WCAG checker for history tracking
+    with console.status("Running WCAG checks..."):
+        if design_input.pages and len(design_input.pages) > 1:
+            wcag_report = run_wcag_check_multi(design_input.pages)
+        else:
+            wcag_report = run_wcag_check(design_input.dom_data)
+
     with console.status("Generating critique..."):
         agent = CritiqueAgent(tone=tone)
         result = agent.run(design_input, context=combined_context)
+
+    # Extract score from critique output (handles **bold** markdown)
+    score = 0
+    score_match = re.search(r"(\d+)\s*/\s*100", result)
+    if score_match:
+        score = int(score_match.group(1))
+
+    # Save run to history and show regression diff
+    if url:
+        device_name = device or "desktop"
+        record = build_run_record(
+            url=url,
+            device=device_name,
+            pages_crawled=len(design_input.pages) if design_input.pages else 1,
+            score=score,
+            wcag_report=wcag_report,
+        )
+
+        previous = get_previous_run(url)
+        save_run(record)
+
+        if previous:
+            diff = compute_diff(previous, record)
+            console.print(Markdown(diff.to_markdown()))
 
     console.print(Markdown(result))
 
@@ -127,6 +163,33 @@ def wcag(
     if save:
         path = save_report(result, "wcag-audit")
         console.print(f"\nSaved to {path}")
+
+
+@app.command()
+def history(
+    url: str = typer.Option(..., "--url", "-u", help="URL to view history for"),
+):
+    """View run history for a URL."""
+    runs = load_history(url)
+    if not runs:
+        console.print(f"No history found for {url}")
+        return
+
+    console.print(f"\n[bold]Run History for {url}[/bold] ({len(runs)} runs)\n")
+    console.print(f"{'#':<4} {'Date':<22} {'Score':<8} {'WCAG':<8} {'Pages':<7} {'Device':<15} {'Violations'}")
+    console.print("-" * 85)
+    for i, run in enumerate(runs):
+        ts = run.timestamp[:19].replace("T", " ")
+        console.print(
+            f"{i+1:<4} {ts:<22} {run.score:<8} {run.wcag_score:<8} "
+            f"{run.pages_crawled:<7} {run.device:<15} {run.total_violations}"
+        )
+
+    # Show trend
+    if len(runs) >= 2:
+        first, last = runs[0], runs[-1]
+        delta = last.score - first.score
+        console.print(f"\nTrend: {first.score} → {last.score} ({'+' if delta >= 0 else ''}{delta} points)")
 
 
 @app.command()

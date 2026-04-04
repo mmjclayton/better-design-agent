@@ -8,6 +8,7 @@ __pycache__/
 dist/
 build/
 output/
+.design-intel/
 .chroma/
 node_modules/
 .venv/
