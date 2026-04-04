@@ -20,11 +20,22 @@ def critique(
     describe: Optional[str] = typer.Option(None, "--describe", "-d", help="Text description"),
     context: Optional[str] = typer.Option(None, "--context", "-c", help="Additional context"),
     tone: str = typer.Option("opinionated", "--tone", "-t", help="Tone: opinionated, balanced, gentle"),
+    crawl: bool = typer.Option(False, "--crawl", help="Crawl app and critique multiple pages"),
+    max_pages: int = typer.Option(10, "--max-pages", help="Max pages to crawl (with --crawl)"),
     save: bool = typer.Option(False, "--save", "-s", help="Save report to output/"),
 ):
     """Run a design critique on a screenshot, URL, or description."""
-    with console.status("Processing input..."):
-        design_input = process_input(image=image, url=url, describe=describe)
+    status_msg = "Crawling app..." if crawl else "Processing input..."
+    with console.status(status_msg):
+        design_input = process_input(
+            image=image, url=url, describe=describe,
+            crawl=crawl, max_pages=max_pages,
+        )
+
+    if crawl and design_input.pages:
+        console.print(f"Captured {len(design_input.pages)} pages:")
+        for p in design_input.pages:
+            console.print(f"  - {p.label} ({p.url})")
 
     with console.status("Generating critique..."):
         agent = CritiqueAgent(tone=tone)

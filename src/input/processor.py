@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from src.input.models import DesignInput, InputType
-from src.input.screenshot import capture_url
+from src.input.models import DesignInput, InputType, PageCapture
+from src.input.screenshot import capture_url, crawl_app
 
 
 def process_image(image_path: str) -> DesignInput:
@@ -11,13 +11,41 @@ def process_image(image_path: str) -> DesignInput:
     return DesignInput(type=InputType.SCREENSHOT, image_path=str(path.resolve()))
 
 
-def process_url(url: str) -> DesignInput:
-    screenshot_path, page_text = capture_url(url)
+def process_url(url: str, crawl: bool = False, max_pages: int = 10) -> DesignInput:
+    if crawl:
+        page_dicts = crawl_app(url, max_pages=max_pages)
+        if not page_dicts:
+            raise RuntimeError(f"Failed to capture any pages from {url}")
+
+        # First page is the primary
+        first = page_dicts[0]
+        pages = [
+            PageCapture(
+                url=p["url"],
+                label=p["label"],
+                image_path=p["image_path"],
+                page_text=p["page_text"],
+                dom_data=p["dom_data"],
+            )
+            for p in page_dicts
+        ]
+
+        return DesignInput(
+            type=InputType.URL,
+            image_path=first["image_path"],
+            page_text=first["page_text"],
+            url=url,
+            dom_data=first["dom_data"],
+            pages=pages,
+        )
+
+    screenshot_path, page_text, dom_data = capture_url(url)
     return DesignInput(
         type=InputType.URL,
         image_path=screenshot_path,
         page_text=page_text,
         url=url,
+        dom_data=dom_data,
     )
 
 
@@ -29,11 +57,13 @@ def process_input(
     image: str | None = None,
     url: str | None = None,
     describe: str | None = None,
+    crawl: bool = False,
+    max_pages: int = 10,
 ) -> DesignInput:
     if image:
         return process_image(image)
     if url:
-        return process_url(url)
+        return process_url(url, crawl=crawl, max_pages=max_pages)
     if describe:
         return process_text(describe)
     raise ValueError("Provide one of: --image, --url, or --describe")
