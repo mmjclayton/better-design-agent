@@ -355,23 +355,21 @@ def _format_dom_data(dom_data: dict) -> str:
                 )
         sections.append("")
 
-    # Focus audit
-    focus = dom_data.get("focus_audit", [])
-    if focus:
-        no_focus = [f for f in focus if not f.get("has_outline") and not f.get("has_box_shadow")]
-        has_focus = [f for f in focus if f.get("has_outline") or f.get("has_box_shadow")]
-        sections.append("### Focus Style Audit")
-        if no_focus:
-            sections.append(f"**Elements without custom focus styles ({len(no_focus)}):**")
-            for f in no_focus[:15]:
-                sections.append(f"- `{f['element']}` \"{f['text']}\"")
-        if has_focus:
-            sections.append(f"\n**Elements with focus styles ({len(has_focus)}):**")
-            for f in has_focus[:10]:
-                sections.append(
-                    f"- `{f['element']}` \"{f['text']}\" - "
-                    f"outline: {f['outline_style']}"
-                )
+    # Focus-visible rule detection (from stylesheet scanning)
+    html = dom_data.get("html_structure", {})
+    has_global_fv = html.get("has_global_focus_visible", False)
+    fv_rules = html.get("focus_visible_rules", [])
+    if has_global_fv or fv_rules:
+        sections.append("### Focus-Visible Rules Detected")
+        if has_global_fv:
+            sections.append("**Global :focus-visible rules found in stylesheets.**")
+        if fv_rules:
+            for rule in fv_rules[:5]:
+                sections.append(f"- `{rule['selector']}`")
+        sections.append("")
+    else:
+        sections.append("### Focus-Visible Rules")
+        sections.append("**No :focus-visible or :focus rules detected in stylesheets.**")
         sections.append("")
 
     # Interactive state tests (hover/focus actual results)
@@ -461,12 +459,6 @@ def _format_multi_page_data(pages) -> str:
             if not e.get("meets_touch_target"):
                 e["page"] = label
                 all_touch_violations.append(e)
-
-        # Focus
-        for f in dom.get("focus_audit", []):
-            if not f.get("has_outline") and not f.get("has_box_shadow"):
-                f["page"] = label
-                all_focus_issues.append(f)
 
         # Non-text contrast
         for n in dom.get("non_text_contrast", []):
@@ -565,16 +557,6 @@ def _format_multi_page_data(pages) -> str:
             )
         sections.append("")
 
-    if all_focus_issues:
-        sections.append(f"### Elements Without Focus Styles ({len(all_focus_issues)} across all pages)")
-        seen = set()
-        for f in all_focus_issues:
-            key = f['element']
-            if key in seen:
-                continue
-            seen.add(key)
-            sections.append(f"- `{f['element']}` \"{f['text']}\" (found on: {f['page']})")
-        sections.append("")
 
     if all_unlabelled:
         sections.append(f"### Unlabelled Form Elements ({len(all_unlabelled)} across all pages)")

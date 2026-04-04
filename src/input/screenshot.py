@@ -27,13 +27,43 @@ DOM_EXTRACTION_SCRIPT = """
     const fontFamilies = {};
     const spacingValues = {};
 
-    function rgbToHex(rgb) {
+    function parseRgba(rgb) {
         if (!rgb || rgb === 'transparent' || rgb === 'rgba(0, 0, 0, 0)') return null;
-        const match = rgb.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
-        if (!match) return rgb;
-        return '#' + [match[1], match[2], match[3]]
-            .map(x => parseInt(x).toString(16).padStart(2, '0'))
+        const match = rgb.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([\\d.]+))?/);
+        if (!match) return null;
+        return {
+            r: parseInt(match[1]),
+            g: parseInt(match[2]),
+            b: parseInt(match[3]),
+            a: match[4] !== undefined ? parseFloat(match[4]) : 1,
+        };
+    }
+
+    function compositeOver(fg, bg) {
+        // Alpha composite fg colour over bg colour
+        const a = fg.a;
+        return {
+            r: Math.round(fg.r * a + bg.r * (1 - a)),
+            g: Math.round(fg.g * a + bg.g * (1 - a)),
+            b: Math.round(fg.b * a + bg.b * (1 - a)),
+            a: 1,
+        };
+    }
+
+    function rgbaToHex(rgba) {
+        if (!rgba) return null;
+        return '#' + [rgba.r, rgba.g, rgba.b]
+            .map(x => Math.min(255, Math.max(0, x)).toString(16).padStart(2, '0'))
             .join('');
+    }
+
+    function rgbToHex(rgb) {
+        const parsed = parseRgba(rgb);
+        if (!parsed) return null;
+        // If fully transparent, return null
+        if (parsed.a === 0) return null;
+        // If semi-transparent, still convert (compositing handled in getEffectiveBg)
+        return rgbaToHex(parsed);
     }
 
     function getLuminance(hex) {
@@ -56,14 +86,26 @@ DOM_EXTRACTION_SCRIPT = """
     }
 
     function getEffectiveBg(el) {
+        // Walk up the DOM, compositing semi-transparent backgrounds
+        // to get the actual rendered background colour
+        const layers = [];
         let current = el;
         while (current && current !== document.documentElement) {
             const bg = getComputedStyle(current).backgroundColor;
-            const hex = rgbToHex(bg);
-            if (hex) return hex;
+            const parsed = parseRgba(bg);
+            if (parsed && parsed.a > 0) {
+                layers.unshift(parsed); // Add to front (bottom-up order)
+                if (parsed.a >= 1) break; // Fully opaque, stop walking
+            }
             current = current.parentElement;
         }
-        return '#ffffff';
+
+        // Start with white fallback, composite each layer on top
+        let result = { r: 255, g: 255, b: 255, a: 1 };
+        for (const layer of layers) {
+            result = compositeOver(layer, result);
+        }
+        return rgbaToHex(result);
     }
 
     // ── CSS Custom Properties (Design Tokens) ──
@@ -226,13 +268,49 @@ DOM_EXTRACTION_SCRIPT = """
     // Images without alt
     htmlAudit.images_without_alt = document.querySelectorAll('img:not([alt])').length;
 
+    // Check for global :focus-visible rules in stylesheets
+    htmlAudit.has_global_focus_visible = false;
+    htmlAudit.focus_visible_rules = [];
+    for (const sheet of document.styleSheets) {
+        try {
+            for (const rule of sheet.cssRules) {
+                const sel = rule.selectorText || '';
+                if (sel.includes(':focus-visible') || sel.includes(':focus')) {
+                    htmlAudit.has_global_focus_visible = true;
+                    // Check if it's a broad selector (global coverage)
+                    if (sel.match(/^[*a-z,\\s]+:focus/) || sel.includes('*:focus')) {
+                        htmlAudit.focus_visible_rules.push({
+                            selector: sel,
+                            properties: rule.cssText.substring(0, 200),
+                        });
+                    }
+                }
+            }
+        } catch (e) { /* cross-origin */ }
+    }
+    // Also check <style> tags for bundled styles
+    if (!htmlAudit.has_global_focus_visible) {
+        for (const styleEl of document.querySelectorAll('style')) {
+            const text = styleEl.textContent || '';
+            if (text.includes(':focus-visible') || text.includes(':focus')) {
+                htmlAudit.has_global_focus_visible = true;
+                const matches = text.match(/[^{]*:focus-visible[^{]*\\{[^}]*\\}/g) || [];
+                for (const m of matches.slice(0, 5)) {
+                    htmlAudit.focus_visible_rules.push({
+                        selector: m.split('{')[0].trim(),
+                        properties: m.substring(0, 200),
+                    });
+                }
+            }
+        }
+    }
+
     results.html_structure = htmlAudit;
 
     // ── Element Analysis ──
     const contrastPairs = [];
     const seen = new Set();
     const interactiveElements = [];
-    const focusAudit = [];
 
     for (const el of allElements) {
         const style = getComputedStyle(el);
@@ -309,18 +387,8 @@ DOM_EXTRACTION_SCRIPT = """
                     has_visible_label: !!(el.labels?.length || el.textContent?.trim()),
                 });
 
-                // Focus style audit - check if element has custom focus styles
-                const focusOutline = style.outlineStyle;
-                const focusBoxShadow = style.boxShadow;
-                const hasCustomFocus = (focusOutline && focusOutline !== 'none')
-                    || (focusBoxShadow && focusBoxShadow !== 'none');
-                focusAudit.push({
-                    element: selector,
-                    text: (el.textContent || '').trim().substring(0, 30),
-                    has_outline: focusOutline !== 'none',
-                    outline_style: focusOutline,
-                    has_box_shadow: focusBoxShadow !== 'none',
-                });
+                // Focus style audit - skip, handled by state testing instead
+                // (checking default state styles doesn't detect :focus-visible rules)
             }
         }
     }
@@ -383,7 +451,9 @@ DOM_EXTRACTION_SCRIPT = """
         .sort((a, b) => a.ratio - b.ratio).slice(0, 20);
 
     results.interactive_elements = interactiveElements.slice(0, 30);
-    results.focus_audit = focusAudit.slice(0, 30);
+    // focus_audit removed - :focus-visible detection handled via
+    // stylesheet rule scanning (html_structure.has_global_focus_visible)
+    // and interactive state testing (_test_interactive_states)
 
     // Layout
     const body = document.body;
