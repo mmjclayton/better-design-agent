@@ -8,6 +8,7 @@ import re
 
 from src.input.processor import process_input
 from src.agents.critique import CritiqueAgent
+from src.agents.orchestrator import run_multi_agent_critique
 from src.analysis.wcag_checker import run_wcag_check, run_wcag_check_multi
 from src.analysis.history import (
     build_run_record, save_run, get_previous_run, compute_diff, load_history,
@@ -43,6 +44,7 @@ def critique(
     device: Optional[str] = typer.Option(None, "--device", help=f"Device preset: {', '.join(DEVICE_PRESETS.keys())}"),
     viewport_width: Optional[int] = typer.Option(None, "--viewport-width", help="Custom viewport width in px"),
     viewport_height: Optional[int] = typer.Option(None, "--viewport-height", help="Custom viewport height in px"),
+    deep: bool = typer.Option(False, "--deep", help="Multi-agent deep analysis (4 specialized agents in parallel)"),
     save: bool = typer.Option(False, "--save", "-s", help="Save report to output/"),
 ):
     """Run a design critique on a screenshot, URL, or description."""
@@ -89,9 +91,13 @@ def critique(
         else:
             wcag_report = run_wcag_check(design_input.dom_data)
 
-    with console.status("Generating critique..."):
-        agent = CritiqueAgent(tone=tone)
-        result = agent.run(design_input, context=combined_context)
+    if deep:
+        with console.status("Running multi-agent deep analysis (4 agents in parallel)..."):
+            result = run_multi_agent_critique(design_input, context=combined_context)
+    else:
+        with console.status("Generating critique..."):
+            agent = CritiqueAgent(tone=tone)
+            result = agent.run(design_input, context=combined_context)
 
     # Extract score from critique output (handles **bold** markdown)
     score = 0
