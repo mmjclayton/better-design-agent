@@ -617,11 +617,13 @@ contradictions?
 ## Output format:
 
 ### Summary
-2-3 sentence visual assessment. Note that this is a screenshot-only review \
-without code access.
+2-3 sentence visual assessment. State the assumed viewport (desktop/tablet/mobile) \
+and note that this is a screenshot-only review without code access.
 
 ### Score
-Rate out of 100 across visual categories only:
+Rate out of 100 across visual categories only. Apply standards appropriate to \
+the detected viewport — do NOT penalise desktop designs for mobile standards \
+or vice versa:
 | Category | Score | Max |
 | Visual Hierarchy | /15 | 15 |
 | Typography | /10 | 10 |
@@ -772,13 +774,56 @@ class CritiqueAgent(BaseAgent):
         self._screenshot_only = (design_input.type == InputType.SCREENSHOT) or not has_dom_data
 
         if self._screenshot_only:
+            # Detect viewport from image dimensions
+            viewport_type = "desktop"
+            viewport_note = ""
+            if design_input.image_path:
+                try:
+                    from PIL import Image
+                    img = Image.open(design_input.image_path)
+                    w, h = img.size
+                    if w < 500:
+                        viewport_type = "mobile"
+                    elif w < 850:
+                        viewport_type = "tablet"
+                    else:
+                        viewport_type = "desktop"
+                    viewport_note = f"Image dimensions: {w}x{h}px"
+                except Exception:
+                    pass
+
+            viewport_instructions = {
+                "mobile": (
+                    "This is a MOBILE screenshot. Evaluate against mobile design patterns only: "
+                    "thumb zone placement, bottom navigation, touch targets (44pt minimum), "
+                    "single-column layout, mobile typography (16px minimum body text). "
+                    "Do NOT critique desktop-specific patterns (sidebar layouts, hover states, "
+                    "multi-column grids, desktop navigation bars)."
+                ),
+                "tablet": (
+                    "This is a TABLET screenshot. Evaluate for tablet patterns: "
+                    "touch-friendly targets, adaptive layout, readable typography. "
+                    "Do NOT apply mobile-only patterns (bottom nav) or desktop-only patterns "
+                    "(dense multi-column layouts, small click targets)."
+                ),
+                "desktop": (
+                    "This is a DESKTOP screenshot. Evaluate against desktop design patterns only: "
+                    "navigation bars, hover affordances, information density, multi-column layouts, "
+                    "readable line lengths (45-75 chars). "
+                    "Do NOT critique mobile-specific patterns (touch targets below 44px are acceptable "
+                    "for mouse/trackpad interaction at 24px+, bottom navigation, thumb zones)."
+                ),
+            }
+
             # Screenshot-only mode — no DOM data, no WCAG checker, visual analysis only
             parts.append(
-                "## Analysis Mode: SCREENSHOT ONLY\n\n"
-                "No DOM extraction or code access is available. "
-                "Evaluate ONLY what is visually verifiable in the attached image. "
-                "Do NOT make claims about HTML structure, ARIA attributes, focus states, "
-                "or any code-level properties."
+                f"## Analysis Mode: SCREENSHOT ONLY\n\n"
+                f"**Assumed viewport: {viewport_type.upper()}** ({viewport_note})\n\n"
+                f"No DOM extraction or code access is available. "
+                f"Evaluate ONLY what is visually verifiable in the attached image. "
+                f"Do NOT make claims about HTML structure, ARIA attributes, focus states, "
+                f"or any code-level properties.\n\n"
+                f"{viewport_instructions[viewport_type]}"
             )
 
             if design_input.type == InputType.SCREENSHOT:
