@@ -87,11 +87,36 @@ Specific positives with exact values and token references.
 - Propose new tokens to fill gaps, using the existing naming convention
 - Recommend a type scale, spacing scale, and radius scale as token tables
 
+## Evaluation Frameworks
+
+Ground your critique in these established frameworks:
+
+**Nielsen's 10 Usability Heuristics** - Evaluate against: visibility of system status, match \
+between system and real world, user control and freedom, consistency and standards, error \
+prevention, recognition over recall, flexibility and efficiency, aesthetic and minimalist \
+design, error recovery, and help/documentation. Reference by name when a violation is found.
+
+**Severity Rating** - Rate each finding on the Nielsen 0-4 scale:
+- 0: Not a problem
+- 1: Cosmetic only
+- 2: Minor usability problem
+- 3: Major usability problem
+- 4: Usability catastrophe
+Map to priority: 4 = must fix before release, 3 = high priority, 2 = low priority, 1 = if time allows.
+
+**Gestalt Principles** - Reference proximity, similarity, closure, continuity, figure-ground, \
+and common region when evaluating visual grouping and hierarchy.
+
+**Fitts's Law** - Time to reach a target is a function of distance and target size. Cite when \
+evaluating touch targets, button placement, and interactive element sizing.
+
 ## Rules:
 - **Reference CSS selectors** (e.g. `.exercise-item`, `.top-nav-tab`) not just "the list items"
 - **Reference token names** (e.g. `var(--accent)` #4F46E5) not just hex values
 - **Cite WCAG criteria by number** (e.g. WCAG 2.5.8 Target Size, WCAG 1.4.11 Non-text Contrast)
+- **Cite heuristics by name** (e.g. "Violates Heuristic #4: Consistency and Standards")
 - Every criticism must include a concrete fix with specific values
+- Rate every finding with a severity (0-4)
 - If analysing a screenshot, describe what you see before critiquing
 """
 
@@ -496,11 +521,30 @@ class CritiqueAgent(BaseAgent):
     def retrieve_knowledge(self, design_input: DesignInput) -> str:
         """Retrieve all knowledge across critique-relevant categories."""
         all_tags = [
-            "contrast", "wcag", "accessibility", "colour",
+            # Accessibility
+            "contrast", "wcag", "accessibility", "colour", "aria",
+            "touch-targets", "inclusive-design", "cognitive", "coga",
+            # Typography & Layout
             "type-scale", "typography", "readability",
             "spacing", "layout", "consistency", "grid",
+            "gestalt", "visual-hierarchy", "whitespace",
+            # Heuristics & Methodology
+            "heuristics", "usability", "evaluation", "severity",
+            "nielsen", "shneiderman", "critique", "methodology",
+            # Interaction & Patterns
+            "forms", "interaction", "navigation", "microinteractions",
+            "information-architecture",
+            # Design Systems
+            "design-system", "design-tokens", "components",
+            "atomic-design", "naming",
+            # Colour & Visual
+            "dark-mode", "psychology", "data-visualisation",
+            # Motion
+            "motion", "animation", "reduced-motion",
+            # Mobile
+            "mobile", "thumb-zone", "responsive", "platform",
         ]
-        return retrieve(tags=all_tags)
+        return retrieve(tags=all_tags, max_tokens=8000)
 
     def build_user_prompt(self, design_input: DesignInput, context: str = "") -> str:
         parts = []
