@@ -46,6 +46,7 @@ def critique(
     device: Optional[str] = typer.Option(None, "--device", help=f"Device preset: {', '.join(DEVICE_PRESETS.keys())}"),
     viewport_width: Optional[int] = typer.Option(None, "--viewport-width", help="Custom viewport width in px"),
     viewport_height: Optional[int] = typer.Option(None, "--viewport-height", help="Custom viewport height in px"),
+    stage: str = typer.Option("production", "--stage", help="Design stage: wireframe, mockup, production"),
     deep: bool = typer.Option(False, "--deep", help="Multi-agent deep analysis (4 specialized agents in parallel)"),
     save: bool = typer.Option(False, "--save", "-s", help="Save report to output/"),
 ):
@@ -66,12 +67,33 @@ def critique(
     if viewport_height:
         vh = viewport_height
 
-    # Add device context to the critique
-    device_context = ""
-    if device_label:
-        device_context = f"This is a mobile view ({device_label}, {vw}x{vh}px). Evaluate against mobile design patterns: thumb zone placement, bottom navigation, touch targets (44pt iOS / 48dp Android), and responsive layout behaviour."
+    # Add device and stage context
+    extra_context_parts = []
 
-    combined_context = f"{context or ''}\n{device_context}".strip() if (context or device_context) else ""
+    if device_label:
+        extra_context_parts.append(f"This is a mobile view ({device_label}, {vw}x{vh}px). Evaluate against mobile design patterns: thumb zone placement, bottom navigation, touch targets (44pt iOS / 48dp Android), and responsive layout behaviour.")
+
+    STAGE_CONTEXT = {
+        "wireframe": (
+            "This is an early-stage WIREFRAME. Focus on information architecture, "
+            "content hierarchy, user flow, and layout structure. Do NOT critique "
+            "visual polish, colour choices, typography details, or pixel-level spacing. "
+            "Flag structural issues: missing content, unclear navigation, wrong IA."
+        ),
+        "mockup": (
+            "This is a MID-FIDELITY MOCKUP. Focus on visual hierarchy, typography "
+            "scale, colour system, spacing rhythm, and component consistency. Flag "
+            "interaction patterns that need definition. Light touch on accessibility "
+            "- note obvious issues but don't deep-audit WCAG compliance yet."
+        ),
+        "production": "",  # Full critique - no stage modifier needed
+    }
+    stage_context = STAGE_CONTEXT.get(stage, "")
+    if stage_context:
+        extra_context_parts.append(stage_context)
+        console.print(f"Stage: {stage} (adjusting critique depth)")
+
+    combined_context = "\n".join(filter(None, [context or ""] + extra_context_parts)).strip()
 
     status_msg = "Crawling app..." if crawl else "Processing input..."
     with console.status(status_msg):
@@ -244,6 +266,41 @@ def components(
 
     if save:
         path = save_report(result, "components")
+        console.print(f"\nSaved to {path}")
+
+
+@app.command()
+def handoff(
+    url: str = typer.Option(..., "--url", "-u", help="URL to generate handoff for"),
+    crawl: bool = typer.Option(False, "--crawl", help="Crawl multiple pages"),
+    max_pages: int = typer.Option(10, "--max-pages", help="Max pages to crawl"),
+    device: Optional[str] = typer.Option(None, "--device", help=f"Device preset"),
+    save: bool = typer.Option(False, "--save", "-s", help="Save report to output/"),
+):
+    """Generate developer handoff specs from a live site."""
+    from src.agents.handoff_agent import HandoffAgent
+
+    vw, vh = 1440, 900
+    if device:
+        preset = DEVICE_PRESETS.get(device)
+        if preset:
+            vw, vh = preset["width"], preset["height"]
+            console.print(f"Using device: {preset['label']} ({vw}x{vh})")
+
+    with console.status("Extracting design data..."):
+        design_input = process_input(
+            url=url, crawl=crawl, max_pages=max_pages,
+            viewport_width=vw, viewport_height=vh,
+        )
+
+    with console.status("Generating handoff specification..."):
+        agent = HandoffAgent()
+        result = agent.run(design_input)
+
+    console.print(Markdown(result))
+
+    if save:
+        path = save_report(result, "handoff")
         console.print(f"\nSaved to {path}")
 
 
