@@ -52,9 +52,15 @@ def critique(
     deep: bool = typer.Option(False, "--deep", help="Multi-agent deep analysis (4 specialized agents in parallel)"),
     ensemble: bool = typer.Option(False, "--ensemble", help="Run multiple models and synthesise findings"),
     ensemble_models: Optional[str] = typer.Option(None, "--models", help="Comma-separated model list (overrides ENSEMBLE_MODELS env var)"),
+    stealth: bool = typer.Option(False, "--stealth", help="Stealth mode: bypass bot detection on protected sites"),
     save: bool = typer.Option(False, "--save", "-s", help="Save report to output/"),
 ):
     """Run a design critique on a screenshot, URL, or description."""
+    # Activate stealth mode if requested
+    if stealth:
+        from src.input.screenshot import set_stealth_mode
+        set_stealth_mode(True)
+        console.print("Stealth mode: enabled (bypassing bot detection)")
 
     STAGE_CONTEXT = {
         "wireframe": (
@@ -105,6 +111,13 @@ def critique(
     if stage != "production":
         console.print(f"Stage: {stage} (adjusting critique depth)")
 
+    def _check_blocked(di):
+        """Check if the site blocked access. Returns True if blocked."""
+        blocked = di.dom_data.get("_blocked", False)
+        if not blocked and di.pages:
+            blocked = any(p.dom_data.get("_blocked", False) for p in di.pages)
+        return blocked
+
     def _run_single_viewport(vw_, vh_, device_label_, device_name_):
         """Run a complete critique for one viewport."""
         ctx = _build_context(device_label_, (vw_, vh_) if device_label_ else None)
@@ -133,6 +146,32 @@ def critique(
 
         # Desktop
         di_desktop, wcag_desktop, ctx_desktop = _run_single_viewport(1440, 900, None, "Desktop")
+
+        # Check for blocked access
+        if _check_blocked(di_desktop):
+            console.print("\n[red bold]Access Denied[/red bold]\n")
+            console.print(f"The site [bold]{url}[/bold] blocked automated access.")
+            console.print("\nThis typically means the site uses bot protection (Cloudflare, Akamai, etc.)")
+            console.print("that prevents automated browsers from loading the real page.\n")
+            console.print("[yellow]Options:[/yellow]")
+            console.print("  1. Try [bold]--stealth[/bold] mode: design-intel critique --url X --stealth")
+            console.print("  2. Take a manual screenshot and use: design-intel critique --image ./screenshot.png")
+            console.print("  3. Use a site without bot protection\n")
+            if save:
+                blocked_report = (
+                    f"# Access Denied\n\n"
+                    f"**URL:** {url}\n\n"
+                    f"The site blocked automated access. Bot protection (Cloudflare, Akamai, etc.) "
+                    f"prevented the agent from loading the real page.\n\n"
+                    f"## What to do\n\n"
+                    f"1. Try `--stealth` mode to bypass basic bot detection\n"
+                    f"2. Take a manual screenshot and use `--image ./screenshot.png`\n"
+                    f"3. If the site uses CAPTCHA or JavaScript challenges, automated review is not possible\n"
+                )
+                path = save_report(blocked_report, "blocked")
+                console.print(f"Saved to {path}")
+            return
+
         # Mobile
         di_mobile, wcag_mobile, ctx_mobile = _run_single_viewport(393, 852, "iPhone 14 Pro", "Mobile")
 
@@ -157,6 +196,29 @@ def critique(
             console.print(f"Captured {len(design_input.pages)} pages:")
             for p in design_input.pages:
                 console.print(f"  - {p.label} ({p.url})")
+
+        # Check for blocked access
+        if _check_blocked(design_input):
+            console.print("\n[red bold]Access Denied[/red bold]\n")
+            console.print(f"The site [bold]{url}[/bold] blocked automated access.")
+            console.print("\nThis typically means the site uses bot protection (Cloudflare, Akamai, etc.)")
+            console.print("that prevents automated browsers from loading the real page.\n")
+            console.print("[yellow]Options:[/yellow]")
+            console.print("  1. Try [bold]--stealth[/bold] mode: design-intel critique --url X --stealth")
+            console.print("  2. Take a manual screenshot and use: design-intel critique --image ./screenshot.png")
+            console.print("  3. Use a site without bot protection\n")
+            if save:
+                blocked_report = (
+                    f"# Access Denied\n\n"
+                    f"**URL:** {url}\n\n"
+                    f"The site blocked automated access.\n\n"
+                    f"## What to do\n\n"
+                    f"1. Try `--stealth` mode\n"
+                    f"2. Take a manual screenshot and use `--image ./screenshot.png`\n"
+                )
+                path = save_report(blocked_report, "blocked")
+                console.print(f"Saved to {path}")
+            return
 
         with console.status("Running WCAG checks..."):
             if design_input.pages and len(design_input.pages) > 1:

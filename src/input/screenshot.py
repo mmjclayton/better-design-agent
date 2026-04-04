@@ -4,6 +4,70 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
+
+# Real Chrome user agent to avoid bot detection
+CHROME_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+
+# Stealth mode flag — set by CLI
+_stealth_mode = False
+
+
+def set_stealth_mode(enabled: bool):
+    global _stealth_mode
+    _stealth_mode = enabled
+
+
+async def _launch_browser(p, headed: bool = False):
+    """Launch browser with optional stealth patches."""
+    if _stealth_mode:
+        browser = await p.chromium.launch(
+            headless=not headed,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--no-sandbox",
+            ],
+        )
+    else:
+        browser = await p.chromium.launch(headless=not headed)
+    return browser
+
+
+async def _new_stealth_page(browser, viewport_width: int, viewport_height: int):
+    """Create a page with stealth patches applied."""
+    context = await browser.new_context(
+        viewport={"width": viewport_width, "height": viewport_height},
+        user_agent=CHROME_USER_AGENT if _stealth_mode else None,
+        locale="en-AU",
+        timezone_id="Australia/Sydney",
+    )
+
+    page = await context.new_page()
+
+    if _stealth_mode:
+        # Patch navigator.webdriver to return false
+        await page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => false });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-AU', 'en'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+
+            // Override permissions query
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) =>
+                parameters.name === 'notifications'
+                    ? Promise.resolve({ state: Notification.permission })
+                    : originalQuery(parameters);
+
+            // Chrome runtime
+            window.chrome = { runtime: {} };
+        """)
+
+    return page
+
 # JavaScript to extract computed styles, design metrics, and HTML structure
 DOM_EXTRACTION_SCRIPT = """
 () => {
@@ -659,12 +723,42 @@ async def _capture_page(page, output_path: str) -> tuple[str, dict]:
     return text, dom_data
 
 
+def _is_blocked_page(text: str, url: str) -> bool:
+    """Detect if the page is an access denied / bot block page."""
+    text_lower = text.lower().strip()
+    block_indicators = [
+        "access denied",
+        "403 forbidden",
+        "you don't have permission",
+        "blocked",
+        "captcha",
+        "verify you are human",
+        "please enable javascript",
+        "checking your browser",
+        "just a moment",
+        "ray id",
+    ]
+    # Short page with block language = likely blocked
+    if len(text_lower) < 500:
+        for indicator in block_indicators:
+            if indicator in text_lower:
+                return True
+    # Title-only pages with errors
+    if len(text_lower) < 100 and any(code in text_lower for code in ["403", "401", "access"]):
+        return True
+    return False
+
+
 async def _capture(url: str, output_path: str, viewport_width: int = 1440, viewport_height: int = 900) -> tuple[str, dict]:
     async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        page = await browser.new_page(viewport={"width": viewport_width, "height": viewport_height})
+        browser = await _launch_browser(p)
+        page = await _new_stealth_page(browser, viewport_width, viewport_height)
         await page.goto(url, wait_until="networkidle", timeout=30000)
         text, dom_data = await _capture_page(page, output_path)
+
+        # Check for access denied
+        dom_data["_blocked"] = _is_blocked_page(text, url)
+
         await browser.close()
     return text, dom_data
 
@@ -692,8 +786,8 @@ async def _crawl_app(
     visited_paths = set()
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        page = await browser.new_page(viewport={"width": viewport_width, "height": viewport_height})
+        browser = await _launch_browser(p)
+        page = await _new_stealth_page(browser, viewport_width, viewport_height)
 
         # Capture the initial page
         await page.goto(url, wait_until="networkidle", timeout=30000)
@@ -703,6 +797,20 @@ async def _crawl_app(
 
         screenshot_path = str(output / "page-000-home.png")
         text, dom_data = await _capture_page(page, screenshot_path)
+
+        # Check for access denied on first page
+        if _is_blocked_page(text, url):
+            dom_data["_blocked"] = True
+            pages_captured.append({
+                "url": page.url,
+                "label": "Home",
+                "image_path": screenshot_path,
+                "page_text": text,
+                "dom_data": dom_data,
+            })
+            await browser.close()
+            return pages_captured
+
         pages_captured.append({
             "url": page.url,
             "label": "Home",
