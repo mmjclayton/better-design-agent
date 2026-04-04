@@ -34,7 +34,80 @@ Outperforms raw Claude Opus and Sonnet sessions on structured design critique be
 | `design-intel history --url X` | View run history + score trend | No |
 | `design-intel index-knowledge` | Rebuild knowledge index | No |
 
-## Quick start
+## Getting started (non-coder friendly)
+
+You don't need to know how to code to set this up. If you're using an AI coding agent (Claude Code, Cursor, Windsurf, etc.), paste the following prompt and it will do everything for you:
+
+### Setup prompt - paste this into your coding agent
+
+```
+Clone and set up the Better Design Agent project for me.
+
+1. Clone the repo: git clone https://github.com/mmjclayton/better-design-agent.git
+2. cd into the project directory
+3. Create a Python virtual environment (needs Python 3.11+, install via brew if needed)
+4. Install the project in editable mode: pip install -e .
+5. Install Playwright's Chromium browser: playwright install chromium
+6. Copy .env.example to .env
+7. Open the .env file so I can add my Anthropic API key
+8. Run: design-intel index-knowledge
+9. Test it works by running: design-intel critique --url "https://excalidraw.com" --save
+```
+
+### What you need before starting
+
+- **An Anthropic API key** - get one at [console.anthropic.com](https://console.anthropic.com). You need API credits (separate from a Claude Pro/Max subscription). $5 of credits is enough for extensive testing.
+- **A coding agent** - Claude Code, Cursor, Windsurf, or any tool that can run terminal commands for you.
+
+That's it. The setup prompt above handles everything else.
+
+### Running critiques - prompts you can paste
+
+Once set up, paste any of these into your coding agent:
+
+**Quick critique of a live site:**
+```
+Run: design-intel critique --url "https://example.com" --save
+Open the saved file for me.
+```
+
+**Deep analysis with all agents:**
+```
+Run: design-intel critique --url "https://example.com" --deep --save
+Open the saved file for me.
+```
+
+**Critique your local dev server:**
+```
+Run: design-intel critique --url "http://localhost:3000" --crawl --save
+Open the saved file for me.
+```
+
+**Mobile view:**
+```
+Run: design-intel critique --url "https://example.com" --device iphone-14-pro --save
+Open the saved file for me.
+```
+
+**WCAG accessibility audit (instant, no LLM costs):**
+```
+Run: design-intel wcag --url "https://example.com" --crawl
+```
+
+**Developer handoff spec:**
+```
+Run: design-intel handoff --url "https://example.com" --save
+Open the saved file for me.
+```
+
+**Check what improved since last run:**
+```
+Run: design-intel history --url "https://example.com"
+```
+
+### Using without a coding agent (manual setup)
+
+If you prefer to run commands yourself:
 
 ```bash
 # Clone
@@ -46,12 +119,12 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 
-# Install browser engine (for URL screenshots)
+# Install browser engine
 playwright install chromium
 
 # Configure
 cp .env.example .env
-# Add your API key to .env
+# Edit .env and add your ANTHROPIC_API_KEY
 
 # Build the knowledge index
 design-intel index-knowledge
