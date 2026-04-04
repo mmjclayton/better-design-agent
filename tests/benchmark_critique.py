@@ -378,6 +378,7 @@ def print_results(results: list[BenchmarkResult]):
 
 def main():
     # File paths — Excalidraw comparison
+    design_intel_final_path = Path("output/critique-20260404-201907.md")
     design_intel_deep_path = Path("output/critique-20260404-194036.md")
     design_intel_single_path = Path("output/critique-20260404-182132.md")
     excalidraw_opus_path = Path("output/excalidraw-opus.md")
@@ -397,7 +398,8 @@ def main():
 
     files = {
         "di single": design_intel_single_path,
-        "di deep": design_intel_deep_path,
+        "di deep v1": design_intel_deep_path,
+        "di final": design_intel_final_path,
         "Opus 4.6": excalidraw_opus_path,
         "Sonnet 4.6": excalidraw_sonnet_path,
     }
