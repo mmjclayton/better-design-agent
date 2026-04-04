@@ -377,11 +377,11 @@ def print_results(results: list[BenchmarkResult]):
 
 
 def main():
-    # File paths
-    design_intel_v10_path = Path("output/critique-20260404-173030.md")
-    design_intel_v9_path = Path("output/critique-20260404-164837.md")
-    design_intel_v3_path = Path("output/critique-20260404-123330.md")
-    design_intel_path = Path("output/critique-20260404-115208.md")
+    # File paths — Excalidraw comparison
+    design_intel_deep_path = Path("output/critique-20260404-194036.md")
+    design_intel_single_path = Path("output/critique-20260404-182132.md")
+    excalidraw_opus_path = Path("output/excalidraw-opus.md")
+    excalidraw_sonnet_path = Path("output/excalidraw-sonnet.md")
     sonnet_path = Path(
         "/Users/matt_clayton/Library/Application Support/Claude/"
         "local-agent-mode-sessions/d79e667b-cec2-487a-8759-f28e7966ed58/"
@@ -396,12 +396,10 @@ def main():
     )
 
     files = {
-        "di v1": design_intel_path,
-        "di v3": design_intel_v3_path,
-        "di v9": design_intel_v9_path,
-        "di v10": design_intel_v10_path,
-        "Sonnet 4.6": sonnet_path,
-        "Opus 4.6": opus_path,
+        "di single": design_intel_single_path,
+        "di deep": design_intel_deep_path,
+        "Opus 4.6": excalidraw_opus_path,
+        "Sonnet 4.6": excalidraw_sonnet_path,
     }
 
     texts = {}
