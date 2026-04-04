@@ -524,25 +524,33 @@ class CritiqueAgent(BaseAgent):
             # Accessibility
             "contrast", "wcag", "accessibility", "colour", "aria",
             "touch-targets", "inclusive-design", "cognitive", "coga",
+            "annotation", "documentation", "handoff", "semantics",
+            "screen-reader", "vestibular",
             # Typography & Layout
-            "type-scale", "typography", "readability",
+            "type-scale", "typography", "readability", "hierarchy",
             "spacing", "layout", "consistency", "grid",
-            "gestalt", "visual-hierarchy", "whitespace",
+            "gestalt", "visual-hierarchy", "whitespace", "density",
+            "reading-patterns", "eye-tracking",
             # Heuristics & Methodology
             "heuristics", "usability", "evaluation", "severity",
             "nielsen", "shneiderman", "critique", "methodology",
+            "review", "feedback",
             # Interaction & Patterns
             "forms", "interaction", "navigation", "microinteractions",
-            "information-architecture",
-            # Design Systems
-            "design-system", "design-tokens", "components",
-            "atomic-design", "naming",
+            "information-architecture", "input", "validation",
+            "states", "patterns", "components",
+            # Design Systems & References
+            "design-system", "design-tokens", "css-variables",
+            "atomic-design", "naming", "figma", "reference", "templates",
             # Colour & Visual
             "dark-mode", "psychology", "data-visualisation",
+            "perception", "colorbrewer",
             # Motion
-            "motion", "animation", "reduced-motion",
-            # Mobile
+            "motion", "animation", "reduced-motion", "transitions",
+            # Mobile & Platform
             "mobile", "thumb-zone", "responsive", "platform",
+            "platform-conventions", "ios", "android", "ergonomics",
+            "breakpoints", "viewport", "touch",
         ]
         return retrieve(tags=all_tags, max_tokens=8000)
 
