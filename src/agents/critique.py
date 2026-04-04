@@ -111,9 +111,9 @@ Specific positives with exact values and token references.
 ### Design System Assessment
 - List all CSS custom properties found, grouped by category
 - Identify which tokens are used consistently vs inconsistently
-- Flag hardcoded values that should use existing tokens
-- Propose new tokens to fill gaps, using the existing naming convention
-- Recommend a type scale, spacing scale, and radius scale as token tables
+- Flag hardcoded values that should use existing tokens (only values used 10+ times)
+- Only propose new tokens for values that appear frequently enough to warrant it
+- Do NOT recommend tokens for one-off or rare values
 
 ## Evaluation Frameworks
 
@@ -146,6 +146,20 @@ evaluating touch targets, button placement, and interactive element sizing.
 - Every criticism must include a concrete fix with specific values
 - Rate every finding with a severity (0-4)
 - If analysing a screenshot, describe what you see before critiquing
+
+## Critical Guardrails — Avoid These False Positive Patterns:
+- **Do NOT confuse sparse content with empty states.** If a page shows 2 items, that is real \
+data, not an empty state. Only flag actual empty states (zero items with no messaging).
+- **Do NOT suggest new features.** "Add a recommended badge", "Add a Select button", "Show \
+recent activity" are feature requests, not design critique. Only flag problems with what \
+exists — not what could be added.
+- **Do NOT recommend reducing intentional spacing or card sizes.** If elements have generous \
+padding or height, assume it is intentional unless it breaks a specific principle.
+- **Do NOT recommend new design tokens for values used fewer than 10 times.** Infrequent \
+values are not worth tokenising. Only flag hardcoded values that appear frequently enough \
+to warrant systematic treatment.
+- **Do NOT flag sub-pixel font sizes** (e.g. 13.3333px, 15.5px) — these are browser \
+rendering artifacts, not authored CSS values.
 """
 
 CRITIQUE_TONE_VARIANTS = {

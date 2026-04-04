@@ -604,11 +604,13 @@ async def _crawl_app(
 
                 // Find links and buttons in nav-like containers
                 const navElements = document.querySelectorAll(
-                    'nav a, nav button, header a, header button, '
+                    'nav a, nav button, header a, header button, footer a, footer button, '
                     + '[role="navigation"] a, [role="navigation"] button, '
                     + '[role="tablist"] [role="tab"], '
                     + '[class*="nav"] a, [class*="nav"] button, '
                     + '[class*="tab"] a, [class*="tab"] button, '
+                    + '[class*="bar"] a, [class*="bar"] button, '
+                    + '[class*="bottom"] a, [class*="bottom"] button, '
                     + '[class*="sidebar"] a, [class*="sidebar"] button, '
                     + '[class*="menu"] a, [class*="menu"] button'
                 );
@@ -616,6 +618,13 @@ async def _crawl_app(
                 for (const el of navElements) {
                     const text = el.textContent?.trim();
                     if (!text || text.length > 30 || text.length < 2) continue;
+
+                    // Skip hidden elements (critical for responsive layouts)
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width === 0 || rect.height === 0) continue;
+                    const elStyle = getComputedStyle(el);
+                    if (elStyle.display === 'none' || elStyle.visibility === 'hidden') continue;
+                    if (elStyle.opacity === '0') continue;
 
                     const href = el.getAttribute('href');
                     const key = text.toLowerCase();
@@ -649,8 +658,8 @@ async def _crawl_app(
             # Skip duplicate labels and filter-type buttons
             if label_lower in seen_labels:
                 continue
-            # Skip very short labels that are likely filters
-            if len(label) <= 3 and not target.get("href"):
+            # Skip very short labels that are likely filters (but keep nav-like ones)
+            if len(label) <= 2 and not target.get("href"):
                 continue
             seen_labels.add(label_lower)
             primary_nav.append(target)
@@ -696,18 +705,27 @@ async def _crawl_app(
                     buttons = page.locator(f"button:has-text('{label}')")
                     count = await buttons.count()
                     if count > 0:
-                        # Click the first non-active one, or the first one
+                        # Click the first visible, non-active button
                         for i in range(count):
                             btn = buttons.nth(i)
+                            if not await btn.is_visible():
+                                continue
                             classes = await btn.get_attribute("class") or ""
                             if "active" not in classes:
                                 element = btn
                                 break
+                        # Fallback: first visible button (even if active)
                         if not element:
-                            element = buttons.first
-                    else:
+                            for i in range(count):
+                                btn = buttons.nth(i)
+                                if await btn.is_visible():
+                                    element = btn
+                                    break
+                    if not element:
                         # Try links
-                        element = page.locator(f"a:has-text('{label}')").first
+                        links = page.locator(f"a:has-text('{label}')")
+                        if await links.count() > 0:
+                            element = links.first
 
                     if element:
                         await element.click()
