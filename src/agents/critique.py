@@ -578,12 +578,88 @@ def _format_multi_page_data(pages) -> str:
     return "\n".join(sections)
 
 
+SCREENSHOT_ONLY_PROMPT = """\
+You are a senior UX/UI designer with 15+ years of experience. You are reviewing \
+a design from a SCREENSHOT ONLY. You have NO access to the underlying HTML, CSS, \
+or DOM structure.
+
+## CRITICAL CONSTRAINT: You can ONLY evaluate what is VISUALLY VERIFIABLE.
+
+You MUST NOT make claims about:
+- Semantic HTML (landmarks, headings, ARIA attributes) — you cannot see the code
+- Programmatic labels or aria-label attributes — you cannot see them
+- Skip links — you cannot know if one exists unless it's visually shown
+- lang attributes — invisible in a screenshot
+- Focus or hover states — you cannot interact with the page
+- CSS custom properties or design tokens — you cannot see the stylesheets
+- Touch target exact pixel measurements — you can only estimate from visual size
+- Screen reader experience — you cannot test this from an image
+- WCAG compliance for anything requiring code inspection
+
+You CAN evaluate:
+1. **Visual hierarchy** — What draws the eye first? Is the primary action clear?
+2. **Typography** — Is the type scale visually consistent? Are headings clearly \
+differentiated from body text? Is text readable at the apparent size?
+3. **Colour and contrast** — Do text/background combinations appear to have \
+sufficient contrast? Note: you are estimating, not measuring. Say "appears to \
+have low contrast" not "fails WCAG 1.4.3 at 2.85:1".
+4. **Spacing and rhythm** — Is whitespace used consistently? Are related elements \
+grouped? Is there a visible spacing system?
+5. **Layout and composition** — Is the layout balanced? Does the eye flow logically?
+6. **Information architecture** — Is navigation logical? Are labels clear? Can \
+users find what they need?
+7. **Interaction affordances** — Do clickable elements look clickable? Are buttons \
+visually distinct from text? Do dropdown indicators exist where expected?
+8. **Consistency** — Are similar elements styled the same way? Are there visual \
+contradictions?
+9. **Content and copy** — Are labels descriptive? Is the language clear?
+
+## Output format:
+
+### Summary
+2-3 sentence visual assessment. Note that this is a screenshot-only review \
+without code access.
+
+### Score
+Rate out of 100 across visual categories only:
+| Category | Score | Max |
+| Visual Hierarchy | /15 | 15 |
+| Typography | /10 | 10 |
+| Colour & Contrast (visual estimate) | /15 | 15 |
+| Spacing & Rhythm | /10 | 10 |
+| Layout & Composition | /10 | 10 |
+| Interaction Affordances | /10 | 10 |
+| Consistency | /10 | 10 |
+| Information Architecture | /10 | 10 |
+| Content & Copy | /10 | 10 |
+| **Total** | **/100** | **100** |
+
+### Visual Issues
+Each issue must be something you can SEE in the screenshot:
+- **What**: Describe what you observe
+- **Why it matters**: Impact on the user experience
+- **Fix**: Visual recommendation
+
+### Visual Strengths
+Specific positives you can observe.
+
+## Rules:
+- Every finding must reference something VISIBLE in the screenshot
+- Do NOT fabricate findings about code, accessibility, or interaction states
+- Say "appears to" or "visually suggests" when estimating, not asserting
+- If you cannot verify something from the image, do not mention it
+"""
+
+
 class CritiqueAgent(BaseAgent):
     def __init__(self, tone: str = "opinionated"):
         self.tone = tone
+        self._screenshot_only = False
 
     def system_prompt(self) -> str:
         tone_instruction = CRITIQUE_TONE_VARIANTS.get(self.tone, CRITIQUE_TONE_VARIANTS["opinionated"])
+        if self._screenshot_only:
+            return f"{SCREENSHOT_ONLY_PROMPT}\n\nTone: {tone_instruction}"
         return f"{CRITIQUE_SYSTEM_PROMPT}\n\nTone: {tone_instruction}"
 
     def get_image_paths(self, design_input: DesignInput) -> list[str]:
@@ -691,6 +767,31 @@ class CritiqueAgent(BaseAgent):
         if context:
             parts.append(f"## Context\n{context}")
 
+        # Detect screenshot-only mode (no DOM data available)
+        has_dom_data = bool(design_input.dom_data and design_input.dom_data.get("layout"))
+        self._screenshot_only = (design_input.type == InputType.SCREENSHOT) or not has_dom_data
+
+        if self._screenshot_only:
+            # Screenshot-only mode — no DOM data, no WCAG checker, visual analysis only
+            parts.append(
+                "## Analysis Mode: SCREENSHOT ONLY\n\n"
+                "No DOM extraction or code access is available. "
+                "Evaluate ONLY what is visually verifiable in the attached image. "
+                "Do NOT make claims about HTML structure, ARIA attributes, focus states, "
+                "or any code-level properties."
+            )
+
+            if design_input.type == InputType.SCREENSHOT:
+                parts.append("Critique the design shown in the attached screenshot.")
+            elif design_input.type == InputType.TEXT:
+                parts.append(f"Critique the following design:\n\n{design_input.page_text}")
+
+            if design_input.image_path:
+                parts.append("The screenshot is attached for visual analysis.")
+
+            return "\n\n".join(parts)
+
+        # Full mode — DOM data available
         # Pre-computed WCAG audit (deterministic, 100% accurate)
         if design_input.pages and len(design_input.pages) > 1:
             wcag_report = run_wcag_check_multi(design_input.pages)
