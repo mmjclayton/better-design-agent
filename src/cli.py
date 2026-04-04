@@ -200,6 +200,32 @@ def critique(
         path = save_report(result, "critique")
         console.print(f"\nSaved to {path}")
 
+        # Also generate HTML report
+        from src.output.html_report import save_html_report
+        image_paths = []
+        page_labels = []
+        if design_input.pages:
+            for p in design_input.pages:
+                if p.image_path:
+                    image_paths.append(p.image_path)
+                    page_labels.append(p.label)
+        elif design_input.image_path:
+            image_paths.append(design_input.image_path)
+            page_labels.append("Main")
+
+        html_path = save_html_report(
+            md_content=result,
+            url=url or "",
+            device=device or "desktop",
+            image_paths=image_paths,
+            page_labels=page_labels,
+        )
+        console.print(f"HTML report: {html_path}")
+
+        # Auto-open HTML report
+        import subprocess
+        subprocess.run(["open", str(html_path)], check=False)
+
 
 @app.command()
 def wcag(
