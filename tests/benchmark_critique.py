@@ -378,6 +378,7 @@ def print_results(results: list[BenchmarkResult]):
 
 def main():
     # File paths
+    design_intel_v4_path = Path("output/critique-20260404-124954.md")
     design_intel_v3_path = Path("output/critique-20260404-123330.md")
     design_intel_v2_path = Path("output/critique-20260404-122631.md")
     design_intel_path = Path("output/critique-20260404-115208.md")
@@ -396,8 +397,8 @@ def main():
 
     files = {
         "di v1": design_intel_path,
-        "di v2": design_intel_v2_path,
         "di v3": design_intel_v3_path,
+        "di v4": design_intel_v4_path,
         "Sonnet 4.6": sonnet_path,
         "Opus 4.6": opus_path,
     }
