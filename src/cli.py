@@ -235,6 +235,18 @@ def wcag(
             report = run_wcag_check(design_input.dom_data)
 
     result = report.to_markdown()
+
+    # Add axe-core results if available
+    axe_data = design_input.dom_data.get("axe_results", {})
+    if axe_data and not axe_data.get("error"):
+        from src.analysis.axe_runner import AxeResult
+        axe = AxeResult(
+            violations=axe_data.get("violations", []),
+            passes=[{"id": p} for p in axe_data.get("passes", [])],
+            incomplete=axe_data.get("incomplete", []),
+        )
+        result += "\n\n---\n\n" + axe.to_markdown()
+
     console.print(Markdown(result))
 
     if save:

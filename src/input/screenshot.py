@@ -639,6 +639,23 @@ async def _capture_page(page, output_path: str) -> tuple[str, dict]:
     except Exception:
         dom_data["state_tests"] = []
 
+    # Run axe-core accessibility audit
+    try:
+        from src.analysis.axe_runner import run_axe_on_page
+        axe_result = await run_axe_on_page(page)
+        dom_data["axe_results"] = {
+            "violations": axe_result.violations,
+            "passes": [p.get("id") for p in axe_result.passes],
+            "incomplete": axe_result.incomplete,
+            "violation_count": axe_result.violation_count,
+            "pass_count": axe_result.pass_count,
+            "critical_count": axe_result.critical_count,
+            "serious_count": axe_result.serious_count,
+            "error": axe_result.error,
+        }
+    except Exception:
+        dom_data["axe_results"] = {"error": "axe-core not available", "violations": [], "passes": []}
+
     return text, dom_data
 
 
