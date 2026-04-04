@@ -67,35 +67,85 @@ DOM_EXTRACTION_SCRIPT = """
     }
 
     // ── CSS Custom Properties (Design Tokens) ──
-    const rootStyles = getComputedStyle(document.documentElement);
+    // Strategy 1: Read from stylesheet rules (works for plain CSS)
+    // Strategy 2: Read computed styles from :root (works for bundlers like Vite/React)
+    // Strategy 3: Read inline style attributes on :root
     const tokenCategories = { color: [], spacing: [], radius: [], font: [], other: [] };
+    const seenTokens = new Set();
 
+    function categorizeToken(name, value) {
+        if (seenTokens.has(name)) return;
+        seenTokens.add(name);
+        const entry = { name, value };
+
+        if (/color|bg|text|accent|surface|border|success|warning|danger|primary|secondary|muted/.test(name)) {
+            tokenCategories.color.push(entry);
+        } else if (/space|gap|padding|margin/.test(name)) {
+            tokenCategories.spacing.push(entry);
+        } else if (/radius|round/.test(name)) {
+            tokenCategories.radius.push(entry);
+        } else if (/font|type|size|weight|line-height|letter/.test(name)) {
+            tokenCategories.font.push(entry);
+        } else {
+            tokenCategories.other.push(entry);
+        }
+    }
+
+    // Strategy 1: Iterate stylesheet rules
     for (const sheet of document.styleSheets) {
         try {
             for (const rule of sheet.cssRules) {
-                if (rule.selectorText === ':root' || rule.selectorText === ':root, :host') {
+                const sel = rule.selectorText || '';
+                if (sel.includes(':root') || sel.includes(':host') || sel === 'html') {
                     for (const prop of rule.style) {
                         if (prop.startsWith('--')) {
                             const value = rule.style.getPropertyValue(prop).trim();
-                            const entry = { name: prop, value: value };
-
-                            if (/color|bg|text|accent|surface|border|success|warning|danger|primary|secondary/.test(prop)) {
-                                tokenCategories.color.push(entry);
-                            } else if (/space|gap|padding|margin/.test(prop)) {
-                                tokenCategories.spacing.push(entry);
-                            } else if (/radius|round/.test(prop)) {
-                                tokenCategories.radius.push(entry);
-                            } else if (/font|text|size/.test(prop)) {
-                                tokenCategories.font.push(entry);
-                            } else {
-                                tokenCategories.other.push(entry);
-                            }
+                            categorizeToken(prop, value);
                         }
                     }
                 }
             }
-        } catch (e) { /* cross-origin stylesheet */ }
+        } catch (e) { /* cross-origin stylesheet, skip */ }
     }
+
+    // Strategy 2: Read computed custom properties from all <style> tags
+    // (catches Vite/React injected styles that may not be in document.styleSheets)
+    for (const styleEl of document.querySelectorAll('style')) {
+        const text = styleEl.textContent || '';
+        const matches = text.matchAll(/--([a-zA-Z0-9-]+)\s*:\s*([^;]+)/g);
+        for (const match of matches) {
+            const name = '--' + match[1];
+            const value = match[2].trim();
+            categorizeToken(name, value);
+        }
+    }
+
+    // Strategy 3: Get computed values for any tokens found, plus probe common token names
+    const rootStyles = getComputedStyle(document.documentElement);
+    const commonTokenPrefixes = [
+        'color', 'bg', 'text', 'accent', 'surface', 'border', 'primary', 'secondary',
+        'space', 'gap', 'padding', 'margin',
+        'radius', 'font', 'type', 'size', 'weight',
+        'shadow', 'transition', 'duration', 'ease',
+        'success', 'warning', 'danger', 'error', 'info',
+        'muted', 'disabled', 'hover', 'focus', 'active',
+    ];
+    // Check if we found any tokens - if not, try probing computed styles
+    if (seenTokens.size === 0) {
+        // Fallback: scan all <style> content for custom property declarations
+        const allStyles = document.querySelectorAll('style, link[rel="stylesheet"]');
+        // Try reading properties that are commonly defined
+        for (const prefix of commonTokenPrefixes) {
+            for (const suffix of ['', '-primary', '-secondary', '-base', '-sm', '-md', '-lg', '-xl', '-1', '-2', '-3', '-4', '-5', '-6', '-8']) {
+                const prop = '--' + prefix + suffix;
+                const val = rootStyles.getPropertyValue(prop).trim();
+                if (val) {
+                    categorizeToken(prop, val);
+                }
+            }
+        }
+    }
+
     results.css_tokens = tokenCategories;
 
     // ── HTML Structure Audit ──
@@ -193,8 +243,10 @@ DOM_EXTRACTION_SCRIPT = """
         if (color) colorCounts[color] = (colorCounts[color] || 0) + 1;
         if (bgColor) bgColorCounts[bgColor] = (bgColorCounts[bgColor] || 0) + 1;
 
-        // Fonts
-        const fontSize = style.fontSize;
+        // Fonts — round sub-pixel values to filter browser rendering artifacts
+        const rawFontSize = style.fontSize;
+        const fontSizeNum = parseFloat(rawFontSize);
+        const fontSize = fontSizeNum ? (Math.round(fontSizeNum) + 'px') : rawFontSize;
         const fontFamily = style.fontFamily.split(',')[0].trim().replace(/['"]/g, '');
         if (fontSize) fontSizes[fontSize] = (fontSizes[fontSize] || 0) + 1;
         if (fontFamily) fontFamilies[fontFamily] = (fontFamilies[fontFamily] || 0) + 1;
@@ -375,6 +427,10 @@ async def _test_interactive_states(page) -> list[dict]:
     """Test hover and focus states on interactive elements by triggering them."""
     results = []
 
+    # Wait for styles to fully load before testing
+    await page.wait_for_load_state("networkidle")
+    await page.wait_for_timeout(500)
+
     # Get interactive elements with unique selectors
     elements = await page.evaluate("""
         () => {
@@ -415,14 +471,14 @@ async def _test_interactive_states(page) -> list[dict]:
             if not default_state:
                 continue
 
-            # Test hover state
+            # Test hover state — wait for CSS transitions to complete
             await page.hover(selector, timeout=2000)
-            await page.wait_for_timeout(100)
+            await page.wait_for_timeout(300)
             hover_state = await page.evaluate(STATE_TEST_SCRIPT, selector)
 
             # Test focus state
             await page.focus(selector, timeout=2000)
-            await page.wait_for_timeout(100)
+            await page.wait_for_timeout(300)
             focus_state = await page.evaluate(STATE_TEST_SCRIPT, selector)
 
             # Compare states
