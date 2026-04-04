@@ -1,5 +1,6 @@
 categories:
   accessibility:
+  - accessibility/annotation-standards.md
   - accessibility/aria-authoring-practices.md
   - accessibility/coga-guidelines.md
   - accessibility/contrast-ratios-wcag.md
@@ -18,6 +19,7 @@ categories:
   - heuristics/severity-ratings.md
   - heuristics/shneiderman-8-golden-rules.md
   interaction:
+  - interaction/component-states.md
   - interaction/form-design-patterns.md
   - interaction/information-architecture.md
   - interaction/microinteractions.md
@@ -39,14 +41,14 @@ categories:
   - systems/atomic-design.md
   - systems/carbon-design.md
   - systems/design-tokens.md
+  - systems/figma-reference-library.md
   - systems/material-design-3.md
   typography:
   - typography/type-scale-ratios.md
   - typography/typographic-hierarchy.md
 tags:
-  aria:
-  - accessibility/aria-authoring-practices.md
   accessibility:
+  - accessibility/annotation-standards.md
   - accessibility/aria-authoring-practices.md
   - accessibility/coga-guidelines.md
   - accessibility/contrast-ratios-wcag.md
@@ -57,6 +59,18 @@ tags:
   - colour/dark-mode-guidelines.md
   - motion/reduced-motion.md
   - systems/carbon-design.md
+  annotation:
+  - accessibility/annotation-standards.md
+  documentation:
+  - accessibility/annotation-standards.md
+  wcag:
+  - accessibility/annotation-standards.md
+  - accessibility/contrast-ratios-wcag.md
+  - accessibility/wcag-2-2-overview.md
+  handoff:
+  - accessibility/annotation-standards.md
+  aria:
+  - accessibility/aria-authoring-practices.md
   semantics:
   - accessibility/aria-authoring-practices.md
   screen-reader:
@@ -74,9 +88,6 @@ tags:
   contrast:
   - accessibility/contrast-ratios-wcag.md
   - colour/dark-mode-guidelines.md
-  wcag:
-  - accessibility/contrast-ratios-wcag.md
-  - accessibility/wcag-2-2-overview.md
   colour:
   - accessibility/contrast-ratios-wcag.md
   - colour/colorbrewer-data-viz.md
@@ -123,6 +134,7 @@ tags:
   feedback:
   - critique/critical-response-process.md
   - critique/design-review-modes.md
+  - interaction/component-states.md
   - interaction/microinteractions.md
   - motion/ui-animation-principles.md
   review:
@@ -142,16 +154,28 @@ tags:
   - heuristics/severity-ratings.md
   shneiderman:
   - heuristics/shneiderman-8-golden-rules.md
+  components:
+  - interaction/component-states.md
+  - systems/atomic-design.md
+  - systems/figma-reference-library.md
+  - systems/material-design-3.md
+  states:
+  - interaction/component-states.md
+  interaction:
+  - interaction/component-states.md
+  - interaction/form-design-patterns.md
+  - interaction/microinteractions.md
+  - interaction/navigation-patterns.md
+  patterns:
+  - interaction/component-states.md
+  - interaction/navigation-patterns.md
+  - systems/figma-reference-library.md
   forms:
   - interaction/form-design-patterns.md
   input:
   - interaction/form-design-patterns.md
   validation:
   - interaction/form-design-patterns.md
-  interaction:
-  - interaction/form-design-patterns.md
-  - interaction/microinteractions.md
-  - interaction/navigation-patterns.md
   information-architecture:
   - interaction/information-architecture.md
   - interaction/navigation-patterns.md
@@ -167,8 +191,6 @@ tags:
   animation:
   - interaction/microinteractions.md
   - motion/ui-animation-principles.md
-  patterns:
-  - interaction/navigation-patterns.md
   reading-patterns:
   - layout/f-pattern-reading.md
   visual-hierarchy:
@@ -241,14 +263,12 @@ tags:
   - systems/atomic-design.md
   - systems/carbon-design.md
   - systems/design-tokens.md
+  - systems/figma-reference-library.md
   - systems/material-design-3.md
   platform-conventions:
   - systems/apple-hig.md
   atomic-design:
   - systems/atomic-design.md
-  components:
-  - systems/atomic-design.md
-  - systems/material-design-3.md
   hierarchy:
   - systems/atomic-design.md
   - typography/typographic-hierarchy.md
@@ -264,6 +284,12 @@ tags:
   - systems/design-tokens.md
   naming:
   - systems/design-tokens.md
+  figma:
+  - systems/figma-reference-library.md
+  reference:
+  - systems/figma-reference-library.md
+  templates:
+  - systems/figma-reference-library.md
   material-design:
   - systems/material-design-3.md
   google:
