@@ -40,7 +40,7 @@ Items are ordered: In Progress → Blocked → Open → Done (most recent first)
 
 ---
 
-## [IN PROGRESS] [Feature] Opinionated UI Review — design-intel ui-audit
+## [DONE - 2026-04-06] [Feature] Opinionated UI Review — design-intel ui-audit
 
 **Summary.** New `review` subcommand that performs an opinionated UI/UX
 quality audit on a live URL. Combines deterministic CSS/DOM analysis
