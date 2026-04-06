@@ -1,5 +1,4 @@
 import asyncio
-import json
 from pathlib import Path
 
 from playwright.async_api import async_playwright
@@ -37,14 +36,20 @@ async def _launch_browser(p, headed: bool = False):
     return browser
 
 
-async def _new_stealth_page(browser, viewport_width: int, viewport_height: int):
-    """Create a page with stealth patches applied."""
-    context = await browser.new_context(
-        viewport={"width": viewport_width, "height": viewport_height},
-        user_agent=CHROME_USER_AGENT if _stealth_mode else None,
-        locale="en-AU",
-        timezone_id="Australia/Sydney",
-    )
+async def _new_stealth_page(
+    browser, viewport_width: int, viewport_height: int,
+    storage_state_path: str | None = None,
+):
+    """Create a page with stealth patches applied, optionally using a saved session."""
+    context_kwargs = {
+        "viewport": {"width": viewport_width, "height": viewport_height},
+        "user_agent": CHROME_USER_AGENT if _stealth_mode else None,
+        "locale": "en-AU",
+        "timezone_id": "Australia/Sydney",
+    }
+    if storage_state_path:
+        context_kwargs["storage_state"] = storage_state_path
+    context = await browser.new_context(**context_kwargs)
 
     page = await context.new_page()
 
@@ -268,7 +273,7 @@ DOM_EXTRACTION_SCRIPT = """
         },
         headings: [],
         skip_link: false,
-        forms: { inputs_without_labels: [], selects_without_labels: [] },
+        forms: { inputs_without_labels: [], selects_without_labels: [], label_breakdown: {} },
         aria_usage: { roles: [], labels: 0, described_by: 0, live_regions: 0 },
         images_without_alt: 0,
     };
@@ -291,13 +296,31 @@ DOM_EXTRACTION_SCRIPT = """
         htmlAudit.skip_link = /skip|jump|main/.test(text);
     }
 
-    // Form labels
+    // Form labels — classify the labelling method so reports can distinguish
+    // between proper <label>, aria-label, and truly unlabelled inputs.
+    const labelBreakdown = {
+        with_label_element: 0,   // <label for="..."> or wrapping <label>
+        with_aria_label: 0,      // aria-label attribute
+        with_aria_labelledby: 0, // aria-labelledby reference
+        with_title: 0,           // title attribute (weakest labelling)
+        unlabelled: 0,           // none of the above
+    };
     for (const input of document.querySelectorAll('input, textarea')) {
-        const hasLabel = input.labels?.length > 0
-            || input.getAttribute('aria-label')
-            || input.getAttribute('aria-labelledby')
-            || input.getAttribute('title');
-        if (!hasLabel && input.type !== 'hidden') {
+        if (input.type === 'hidden') continue;
+        const hasLabelElement = input.labels?.length > 0;
+        const hasAriaLabel = !!input.getAttribute('aria-label');
+        const hasAriaLabelledBy = !!input.getAttribute('aria-labelledby');
+        const hasTitle = !!input.getAttribute('title');
+        if (hasLabelElement) {
+            labelBreakdown.with_label_element++;
+        } else if (hasAriaLabel) {
+            labelBreakdown.with_aria_label++;
+        } else if (hasAriaLabelledBy) {
+            labelBreakdown.with_aria_labelledby++;
+        } else if (hasTitle) {
+            labelBreakdown.with_title++;
+        } else {
+            labelBreakdown.unlabelled++;
             htmlAudit.forms.inputs_without_labels.push({
                 type: input.type || 'text',
                 placeholder: input.placeholder || null,
@@ -306,6 +329,7 @@ DOM_EXTRACTION_SCRIPT = """
             });
         }
     }
+    htmlAudit.forms.label_breakdown = labelBreakdown;
     for (const select of document.querySelectorAll('select')) {
         const hasLabel = select.labels?.length > 0
             || select.getAttribute('aria-label')
@@ -332,24 +356,35 @@ DOM_EXTRACTION_SCRIPT = """
     // Images without alt
     htmlAudit.images_without_alt = document.querySelectorAll('img:not([alt])').length;
 
-    // Check for global :focus-visible rules in stylesheets
+    // Check for :focus-visible / :focus rules in stylesheets.
+    // Rules nested inside @media / @supports blocks need a recursive walk —
+    // rule.cssRules on CSSMediaRule holds the wrapped style rules.
     htmlAudit.has_global_focus_visible = false;
     htmlAudit.focus_visible_rules = [];
-    for (const sheet of document.styleSheets) {
-        try {
-            for (const rule of sheet.cssRules) {
-                const sel = rule.selectorText || '';
-                if (sel.includes(':focus-visible') || sel.includes(':focus')) {
-                    htmlAudit.has_global_focus_visible = true;
-                    // Check if it's a broad selector (global coverage)
-                    if (sel.match(/^[*a-z,\\s]+:focus/) || sel.includes('*:focus')) {
-                        htmlAudit.focus_visible_rules.push({
-                            selector: sel,
-                            properties: rule.cssText.substring(0, 200),
-                        });
-                    }
+
+    function walkCssRules(rules) {
+        for (const rule of rules) {
+            // Recurse into grouping rules (CSSMediaRule, CSSSupportsRule, etc.)
+            if (rule.cssRules) {
+                walkCssRules(rule.cssRules);
+                continue;
+            }
+            const sel = rule.selectorText || '';
+            if (sel.includes(':focus-visible') || sel.includes(':focus')) {
+                htmlAudit.has_global_focus_visible = true;
+                if (sel.match(/^[*a-z,\\s]+:focus/) || sel.includes('*:focus')) {
+                    htmlAudit.focus_visible_rules.push({
+                        selector: sel,
+                        properties: rule.cssText.substring(0, 200),
+                    });
                 }
             }
+        }
+    }
+
+    for (const sheet of document.styleSheets) {
+        try {
+            walkCssRules(sheet.cssRules);
         } catch (e) { /* cross-origin */ }
     }
     // Also check <style> tags for bundled styles
@@ -438,6 +473,15 @@ DOM_EXTRACTION_SCRIPT = """
         if (isInteractive) {
             const rect = el.getBoundingClientRect();
             if (rect.width > 0 && rect.height > 0) {
+                // Filter elements hidden via CSS. display:none already
+                // produces zero rects, but visibility:hidden / opacity:0 /
+                // responsive-hidden mobile nav can keep the rect alive.
+                const elStyle = getComputedStyle(el);
+                if (elStyle.visibility === "hidden" || elStyle.display === "none") continue;
+                if (parseFloat(elStyle.opacity || "1") === 0) continue;
+                // Responsive-hidden: element is offscreen via negative position
+                if (rect.bottom < 0 || rect.right < 0) continue;
+
                 const selector = el.tagName.toLowerCase()
                     + (el.className ? '.' + el.className.toString().split(' ')[0] : '');
 
@@ -458,11 +502,31 @@ DOM_EXTRACTION_SCRIPT = """
     }
 
     // ── Non-text contrast (UI component boundaries) ──
-    const uiComponents = document.querySelectorAll('input, select, textarea, button, [role="button"]');
+    // WCAG 1.4.11 applies ONLY to components whose meaning depends on their
+    // boundary being visible — icon-only buttons, unfilled checkboxes, empty
+    // inputs with no placeholder, etc. Buttons with visible text labels or
+    // inputs with placeholders are identified by that content, not by their
+    // border/background contrast, so 1.4.11 doesn't apply to them.
+    const uiComponents = document.querySelectorAll('input, select, textarea, button, [role="button"], [role="checkbox"], [role="radio"], [role="switch"]');
     for (const el of uiComponents) {
         const style = getComputedStyle(el);
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) continue;
+
+        // Skip elements that are identified by visible content — 1.4.11 doesn't apply.
+        const textContent = (el.textContent || '').trim();
+        const placeholder = (el.getAttribute('placeholder') || '').trim();
+        const ariaLabel = (el.getAttribute('aria-label') || '').trim();
+        const ariaLabelledBy = el.getAttribute('aria-labelledby');
+        const title = (el.getAttribute('title') || '').trim();
+        const inputValue = el.value || '';
+        const hasVisibleContent = textContent.length > 0 || placeholder.length > 0 || inputValue.length > 0;
+        const hasProgrammaticLabel = ariaLabel.length > 0 || ariaLabelledBy || title.length > 0;
+
+        // If the element has EITHER visible content OR a programmatic label,
+        // 1.4.11 doesn't require boundary contrast — the component is already
+        // identifiable. Skip.
+        if (hasVisibleContent || hasProgrammaticLabel) continue;
 
         const elBg = rgbToHex(style.backgroundColor);
         const parentBg = getEffectiveBg(el.parentElement);
@@ -476,7 +540,7 @@ DOM_EXTRACTION_SCRIPT = """
 
             results.non_text_contrast.push({
                 element: selector,
-                text: (el.textContent || el.placeholder || '').trim().substring(0, 30),
+                text: '(no label)',
                 component_bg: elBg,
                 adjacent_bg: parentBg,
                 bg_ratio: bgRatio,
@@ -484,6 +548,7 @@ DOM_EXTRACTION_SCRIPT = """
                 border_color: hasBorder ? borderColor : null,
                 border_ratio: hasBorder && borderColor ? getContrastRatio(borderColor, parentBg) : null,
                 passes_3_to_1: (bgRatio >= 3) || (hasBorder && borderColor && getContrastRatio(borderColor, parentBg) >= 3),
+                reason: 'unlabelled-control',
             });
         }
     }
@@ -531,6 +596,98 @@ DOM_EXTRACTION_SCRIPT = """
         body_bg: rgbToHex(bodyStyle.backgroundColor),
     };
 
+    // ── Component Style Extraction ──
+    // Capture detailed computed styles for common UI element types.
+    function extractElementStyle(el) {
+        const s = getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return {
+            selector: el.tagName.toLowerCase()
+                + (el.className ? '.' + el.className.toString().split(' ')[0] : ''),
+            text: (el.textContent || '').trim().substring(0, 40),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+            color: rgbToHex(s.color),
+            bg: rgbToHex(s.backgroundColor),
+            font_size: s.fontSize,
+            font_weight: s.fontWeight,
+            font_family: s.fontFamily.split(',')[0].trim().replace(/['"]/g, ''),
+            line_height: s.lineHeight,
+            letter_spacing: s.letterSpacing !== 'normal' ? s.letterSpacing : null,
+            text_transform: s.textTransform !== 'none' ? s.textTransform : null,
+            padding: s.padding,
+            border_radius: s.borderRadius,
+            border: s.borderStyle !== 'none' ? `${s.borderWidth} ${s.borderStyle} ${rgbToHex(s.borderColor) || s.borderColor}` : null,
+            box_shadow: s.boxShadow !== 'none' ? s.boxShadow : null,
+            transition: s.transition !== 'all 0s ease 0s' && s.transition !== 'none 0s ease 0s' ? s.transition : null,
+            opacity: s.opacity !== '1' ? s.opacity : null,
+            cursor: s.cursor,
+            display: s.display,
+            gap: s.gap !== 'normal' ? s.gap : null,
+        };
+    }
+
+    const componentStyles = { buttons: [], inputs: [], links: [], cards: [], headings: [], images: [] };
+    const seenSelectors = new Set();
+
+    function addUnique(list, el, maxItems) {
+        if (list.length >= maxItems) return;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
+        const s = getComputedStyle(el);
+        if (s.display === 'none' || s.visibility === 'hidden') return;
+        const info = extractElementStyle(el);
+        const key = info.selector + '|' + info.bg + '|' + info.font_size;
+        if (seenSelectors.has(key)) return;
+        seenSelectors.add(key);
+        list.push(info);
+    }
+
+    // Buttons
+    for (const el of document.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"], a.btn, a.button, [class*="btn"], [class*="button"]')) {
+        addUnique(componentStyles.buttons, el, 10);
+    }
+
+    // Inputs
+    for (const el of document.querySelectorAll('input[type="text"], input[type="email"], input[type="password"], input[type="search"], input[type="tel"], input[type="url"], input[type="number"], input:not([type]), textarea, select')) {
+        addUnique(componentStyles.inputs, el, 10);
+    }
+
+    // Links (non-button)
+    for (const el of document.querySelectorAll('a:not(.btn):not(.button):not([class*="btn"]):not([class*="button"])')) {
+        addUnique(componentStyles.links, el, 10);
+    }
+
+    // Cards — heuristic: elements with border-radius + shadow or border + padding
+    for (const el of document.querySelectorAll('[class*="card"], [class*="Card"], article, .tile, .panel')) {
+        addUnique(componentStyles.cards, el, 8);
+    }
+
+    // Headings
+    for (const el of document.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+        addUnique(componentStyles.headings, el, 12);
+    }
+
+    // Images
+    for (const el of document.querySelectorAll('img')) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+            const s = getComputedStyle(el);
+            if (componentStyles.images.length < 6) {
+                componentStyles.images.push({
+                    selector: el.tagName.toLowerCase() + (el.className ? '.' + el.className.toString().split(' ')[0] : ''),
+                    width: Math.round(rect.width),
+                    height: Math.round(rect.height),
+                    border_radius: s.borderRadius,
+                    object_fit: s.objectFit,
+                    aspect_ratio: rect.width > 0 ? Math.round((rect.width / rect.height) * 100) / 100 : null,
+                });
+            }
+        }
+    }
+
+    results.component_styles = componentStyles;
+
     return results;
 }
 """
@@ -561,8 +718,16 @@ async def _test_interactive_states(page) -> list[dict]:
     """Test hover and focus states on interactive elements by triggering them."""
     results = []
 
-    # Wait for styles to fully load before testing
-    await page.wait_for_load_state("networkidle")
+    # Wait for styles to load. Sites with persistent analytics (Notion,
+    # Airbnb etc.) never reach networkidle — fall back to domcontentloaded
+    # with a short settle so state tests still run instead of timing out.
+    try:
+        await page.wait_for_load_state("networkidle", timeout=5000)
+    except Exception:
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=2000)
+        except Exception:
+            pass
     await page.wait_for_timeout(500)
 
     # Get interactive elements with unique selectors
@@ -749,11 +914,18 @@ def _is_blocked_page(text: str, url: str) -> bool:
     return False
 
 
-async def _capture(url: str, output_path: str, viewport_width: int = 1440, viewport_height: int = 900) -> tuple[str, dict]:
+async def _capture(url: str, output_path: str, viewport_width: int = 1440, viewport_height: int = 900, storage_state_path: str | None = None) -> tuple[str, dict]:
     async with async_playwright() as p:
         browser = await _launch_browser(p)
-        page = await _new_stealth_page(browser, viewport_width, viewport_height)
-        await page.goto(url, wait_until="networkidle", timeout=30000)
+        page = await _new_stealth_page(browser, viewport_width, viewport_height, storage_state_path=storage_state_path)
+        # Try networkidle first (cleanest signal). Sites with persistent
+        # analytics / polling never reach idle, so fall back to domcontentloaded
+        # + a short settling delay.
+        try:
+            await page.goto(url, wait_until="networkidle", timeout=15000)
+        except Exception:
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(2000)  # let late-loading content render
         text, dom_data = await _capture_page(page, output_path)
 
         # Check for access denied
@@ -769,6 +941,8 @@ async def _crawl_app(
     viewport_width: int = 1440,
     viewport_height: int = 900,
     max_pages: int = 10,
+    storage_state_path: str | None = None,
+    dedupe_templates: bool = True,
 ) -> list[dict]:
     """Crawl an app by discovering and clicking navigation links.
 
@@ -781,13 +955,16 @@ async def _crawl_app(
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
 
+    from src.analysis.structural_fingerprint import structural_fingerprint
+
     pages_captured = []
     visited_urls = set()
     visited_paths = set()
+    captured_fingerprints: set[str] = set()
 
     async with async_playwright() as p:
         browser = await _launch_browser(p)
-        page = await _new_stealth_page(browser, viewport_width, viewport_height)
+        page = await _new_stealth_page(browser, viewport_width, viewport_height, storage_state_path=storage_state_path)
 
         # Capture the initial page
         await page.goto(url, wait_until="networkidle", timeout=30000)
@@ -818,6 +995,8 @@ async def _crawl_app(
             "page_text": text,
             "dom_data": dom_data,
         })
+        if dedupe_templates:
+            captured_fingerprints.add(structural_fingerprint(dom_data))
 
         # Discover navigation links
         nav_targets = await page.evaluate("""
@@ -978,6 +1157,14 @@ async def _crawl_app(
                 screenshot_path = str(output / f"page-{page_num:03d}-{safe_label}.png")
                 text, dom_data = await _capture_page(page, screenshot_path)
 
+                # Skip if structural template matches an already-captured page.
+                if dedupe_templates:
+                    fp = structural_fingerprint(dom_data)
+                    if fp in captured_fingerprints:
+                        await page.goto(url, wait_until="networkidle", timeout=15000)
+                        continue
+                    captured_fingerprints.add(fp)
+
                 pages_captured.append({
                     "url": new_url,
                     "label": label,
@@ -1003,13 +1190,62 @@ async def _crawl_app(
     return pages_captured
 
 
-def capture_url(url: str, output_path: str = "output/screenshot.png", viewport_width: int = 1440, viewport_height: int = 900) -> tuple[str, str, dict]:
+def capture_url(url: str, output_path: str = "output/screenshot.png", viewport_width: int = 1440, viewport_height: int = 900, storage_state_path: str | None = None) -> tuple[str, str, dict]:
     """Capture a screenshot of a URL. Returns (screenshot_path, extracted_text, dom_data)."""
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    text, dom_data = asyncio.run(_capture(url, output_path, viewport_width=viewport_width, viewport_height=viewport_height))
+    text, dom_data = asyncio.run(_capture(url, output_path, viewport_width=viewport_width, viewport_height=viewport_height, storage_state_path=storage_state_path))
     return output_path, text, dom_data
 
 
-def crawl_app(url: str, output_dir: str = "output/pages", max_pages: int = 10, viewport_width: int = 1440, viewport_height: int = 900) -> list[dict]:
+def crawl_app(url: str, output_dir: str = "output/pages", max_pages: int = 10, viewport_width: int = 1440, viewport_height: int = 900, storage_state_path: str | None = None, dedupe_templates: bool = True) -> list[dict]:
     """Crawl an app and capture multiple pages. Returns list of page capture dicts."""
-    return asyncio.run(_crawl_app(url, output_dir, max_pages=max_pages, viewport_width=viewport_width, viewport_height=viewport_height))
+    return asyncio.run(_crawl_app(url, output_dir, max_pages=max_pages, viewport_width=viewport_width, viewport_height=viewport_height, storage_state_path=storage_state_path, dedupe_templates=dedupe_templates))
+
+
+async def save_auth_session(url: str, output_path: str) -> dict:
+    """Open a visible browser so the user can log in manually, then save storage state.
+
+    Polls storage_state every 2s while the browser is connected, so the
+    latest session is always on disk. Exits cleanly on browser close.
+    """
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=False)
+        context = await browser.new_context(
+            viewport={"width": 1280, "height": 800},
+            locale="en-AU",
+        )
+        page = await context.new_page()
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        except Exception:
+            # Initial nav failures aren't fatal — user can navigate manually.
+            pass
+
+        # Poll storage_state while the browser is alive.
+        # `browser.is_connected()` flips to False as soon as the window closes,
+        # so we break out of the loop cleanly without racing on event handlers.
+        latest_state: dict = {}
+        while browser.is_connected():
+            try:
+                latest_state = await context.storage_state(path=output_path)
+            except Exception:
+                # Browser / context tearing down — exit silently.
+                break
+            try:
+                await asyncio.sleep(2.0)
+            except Exception:
+                break
+
+        cookies = latest_state.get("cookies", [])
+        origins = latest_state.get("origins", [])
+        return {
+            "cookies": len(cookies),
+            "origins": [o.get("origin", "") for o in origins],
+            "output_path": output_path,
+        }
+
+
+def save_auth(url: str, output_path: str) -> dict:
+    """Sync wrapper around save_auth_session."""
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    return asyncio.run(save_auth_session(url, output_path))
