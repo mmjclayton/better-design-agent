@@ -1462,6 +1462,104 @@ class ResponsiveReport:
         return "\n".join(lines)
 
 
+@dataclass
+class CrawlReviewReport:
+    """Aggregated UI review across multiple crawled pages."""
+    page_reports: list[dict] = field(default_factory=list)  # [{url, label, report}]
+
+    @property
+    def page_count(self) -> int:
+        return len(self.page_reports)
+
+    @property
+    def overall_score(self) -> float:
+        if not self.page_reports:
+            return 0.0
+        scores = [p["report"].overall_score for p in self.page_reports]
+        return round(sum(scores) / len(scores), 1)
+
+    @property
+    def weakest_page(self) -> dict | None:
+        if not self.page_reports:
+            return None
+        return min(self.page_reports, key=lambda p: p["report"].overall_score)
+
+    @property
+    def cross_page_findings(self) -> list[dict]:
+        """Findings that appear on 50%+ of pages — systemic issues."""
+        from collections import Counter
+        msg_counter: Counter = Counter()
+        msg_examples: dict[str, str] = {}
+        for p in self.page_reports:
+            seen_on_page: set[str] = set()
+            for f in p["report"].all_findings:
+                if f.message not in seen_on_page:
+                    msg_counter[f.message] += 1
+                    seen_on_page.add(f.message)
+                    if f.message not in msg_examples:
+                        msg_examples[f.message] = p.get("label", p.get("url", ""))
+        threshold = max(2, len(self.page_reports) // 2)
+        return [
+            {"message": msg, "page_count": count, "example_page": msg_examples.get(msg, "")}
+            for msg, count in msg_counter.most_common()
+            if count >= threshold
+        ]
+
+    def to_dict(self) -> dict:
+        return {
+            "page_count": self.page_count,
+            "overall_score": self.overall_score,
+            "pages": [
+                {
+                    "url": p["url"],
+                    "label": p["label"],
+                    "score": p["report"].overall_score,
+                    "report": p["report"].to_dict(),
+                }
+                for p in self.page_reports
+            ],
+            "cross_page_findings": self.cross_page_findings,
+        }
+
+    def to_markdown(self) -> str:
+        lines = [
+            f"## UI Review — {self.page_count} Pages Crawled\n",
+            f"**Overall score: {self.overall_score}/100** (average across pages)\n",
+        ]
+
+        # Page scores table
+        lines.append("| Page | Score | Top Issue |")
+        lines.append("|------|-------|-----------|")
+        for p in sorted(self.page_reports, key=lambda x: x["report"].overall_score):
+            report = p["report"]
+            label = p.get("label", p.get("url", "?"))
+            if len(label) > 45:
+                label = label[:42] + "..."
+            top_issue = ""
+            if report.high_findings:
+                top_issue = report.high_findings[0].message[:60]
+            elif report.all_findings:
+                top_issue = report.all_findings[0].message[:60]
+            lines.append(f"| {label} | {report.overall_score}/100 | {top_issue} |")
+        lines.append("")
+
+        # Cross-page findings
+        cross = self.cross_page_findings
+        if cross:
+            lines.append("### Systemic Issues (found on 2+ pages)\n")
+            for cf in cross:
+                lines.append(f"- **{cf['message']}** ({cf['page_count']}/{self.page_count} pages)")
+            lines.append("")
+
+        # Weakest page detail
+        weakest = self.weakest_page
+        if weakest and self.page_count > 1:
+            lines.append(f"### Weakest Page: {weakest.get('label', weakest.get('url', '?'))}\n")
+            lines.append(weakest["report"].to_markdown())
+
+        return "\n".join(lines)
+
+
 # ── LLM opinion layer ──
 
 _REVIEW_SYSTEM_PROMPT = """\

@@ -599,6 +599,8 @@ def components(
 @app.command(name="ui-audit")
 def ui_audit(
     url: str = typer.Option(..., "--url", "-u", help="URL to audit"),
+    crawl: bool = typer.Option(False, "--crawl", help="Crawl the app and audit every page found"),
+    max_pages: int = typer.Option(10, "--max-pages", help="Max pages to crawl"),
     device: Optional[str] = typer.Option(None, "--device", help=f"Device preset: {', '.join(DEVICE_PRESETS.keys())}"),
     responsive: bool = typer.Option(False, "--responsive", "-r", help="Audit at mobile/tablet/desktop breakpoints"),
     style_guide: Optional[str] = typer.Option(None, "--style-guide", "-g", help="Compare against a saved style guide (name or path)"),
@@ -649,7 +651,7 @@ def ui_audit(
                 path = save_report(content, "ui-audit-responsive", format=fmt)
                 console.print(f"\nSaved to {path}")
         else:
-            # Single viewport audit
+            # Single or crawl viewport audit
             vw, vh = 1440, 900
             if device:
                 preset = DEVICE_PRESETS.get(device)
@@ -659,10 +661,44 @@ def ui_audit(
                 vw, vh = preset["width"], preset["height"]
                 console.print(f"Using device: {preset['label']} ({vw}x{vh})")
 
-            with console.status("Capturing page..."):
-                design_input = process_input(url=url, viewport_width=vw, viewport_height=vh)
+            status_msg = "Crawling app..." if crawl else "Capturing page..."
+            with console.status(status_msg):
+                design_input = process_input(
+                    url=url, crawl=crawl, max_pages=max_pages,
+                    viewport_width=vw, viewport_height=vh,
+                )
 
             _warn_if_login_page(design_input, url)
+
+            # Multi-page crawl review
+            if crawl and design_input.pages and len(design_input.pages) > 1:
+                from src.analysis.ui_review import CrawlReviewReport
+                crawl_report = CrawlReviewReport()
+                for i, page in enumerate(design_input.pages):
+                    label = page.label or page.url
+                    console.print(f"  [{i+1}/{len(design_input.pages)}] Reviewing {label}...")
+                    page_review = run_ui_review(page.dom_data)
+                    crawl_report.page_reports.append({
+                        "url": page.url,
+                        "label": label,
+                        "report": page_review,
+                    })
+
+                if format == "json":
+                    output = json_mod.dumps(crawl_report.to_dict(), indent=2)
+                    console.print(output)
+                else:
+                    console.print(Markdown(crawl_report.to_markdown()))
+
+                if save:
+                    fmt = "json" if format == "json" else "md"
+                    content = (
+                        json_mod.dumps(crawl_report.to_dict(), indent=2) if format == "json"
+                        else crawl_report.to_markdown()
+                    )
+                    path = save_report(content, "ui-audit-crawl", format=fmt)
+                    console.print(f"\nSaved to {path}")
+                return
 
             with console.status("Running UI review..."):
                 report = run_ui_review(design_input.dom_data)
