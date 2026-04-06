@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This project tests whether Claude Code (Opus 4.6) can self-determine improvements to its own standard design review capabilities. Claude was given the target UX for a design review agent and instructed to self-improve and self-plan how to build a better one. The key feedback loop is testing the outputs by reviewing my own projects and Claude Code instances, asking the other instances for feedback on the findings, then passing the feedback to the better design agent builder. In many cases the agent reports improvements over standard model defaults.
+This project tests whether Claude Code (Opus 4.6) can self-determine improvements to its own standard design review capabilities. Claude was given the target UX for a design review agent and instructed to self-improve and self-plan how to build a better one. The key feedback loop: the agent reviews my projects, I ask separate Claude Code instances to critique those findings, then feed their feedback back into the agent's build process. In many cases the agent reports improvements over standard model defaults.
 
 The section below is maintained by the agent itself with its honest assessment of performance versus standard Claude skills.
 
