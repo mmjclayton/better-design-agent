@@ -610,6 +610,23 @@ def ui_audit(
     stealth: bool = typer.Option(False, "--stealth", help="Stealth mode: bypass bot detection"),
 ):
     """Opinionated UI quality audit — typography, colour, spacing, interactivity, hierarchy."""
+
+    def _save_ui_audit(md_content: str, report_name: str, audit_url: str):
+        """Save both markdown and HTML reports."""
+        from src.output.html_report import save_html_report
+        md_path = save_report(md_content, report_name, format="md")
+        html_path = save_html_report(
+            md_content, url=audit_url, device=device or "desktop",
+            output_dir=str(md_path.parent),
+        )
+        # Rename HTML to match the markdown filename
+        final_html = md_path.with_suffix(".html")
+        if html_path != final_html:
+            html_path.rename(final_html)
+            html_path = final_html
+        console.print(f"\nSaved to {md_path}")
+        console.print(f"         {html_path}")
+
     if stealth:
         from src.input.screenshot import set_stealth_mode
         set_stealth_mode(True)
@@ -643,13 +660,12 @@ def ui_audit(
                     console.print(Markdown(desktop_report.to_markdown()))
 
             if save:
-                fmt = "json" if format == "json" else "md"
-                content = (
-                    json_mod.dumps(responsive_report.to_dict(), indent=2) if format == "json"
-                    else responsive_report.to_markdown()
-                )
-                path = save_report(content, "ui-audit-responsive", format=fmt)
-                console.print(f"\nSaved to {path}")
+                if format == "json":
+                    content = json_mod.dumps(responsive_report.to_dict(), indent=2)
+                    path = save_report(content, "ui-audit-responsive", format="json")
+                    console.print(f"\nSaved to {path}")
+                else:
+                    _save_ui_audit(responsive_report.to_markdown(), "ui-audit-responsive", url)
         else:
             # Single or crawl viewport audit
             vw, vh = 1440, 900
@@ -691,13 +707,12 @@ def ui_audit(
                     console.print(Markdown(crawl_report.to_markdown()))
 
                 if save:
-                    fmt = "json" if format == "json" else "md"
-                    content = (
-                        json_mod.dumps(crawl_report.to_dict(), indent=2) if format == "json"
-                        else crawl_report.to_markdown()
-                    )
-                    path = save_report(content, "ui-audit-crawl", format=fmt)
-                    console.print(f"\nSaved to {path}")
+                    if format == "json":
+                        content = json_mod.dumps(crawl_report.to_dict(), indent=2)
+                        path = save_report(content, "ui-audit-crawl", format="json")
+                        console.print(f"\nSaved to {path}")
+                    else:
+                        _save_ui_audit(crawl_report.to_markdown(), "ui-audit-crawl", url)
                 return
 
             with console.status("Running UI review..."):
@@ -732,18 +747,18 @@ def ui_audit(
                 console.print(Markdown(result))
 
             if save:
-                fmt = "json" if format == "json" else "md"
                 if format == "json":
                     result_dict = report.to_dict()
                     if guide_comparison:
                         result_dict["style_guide_comparison"] = guide_comparison.to_dict()
                     content = json_mod.dumps(result_dict, indent=2)
+                    path = save_report(content, "ui-audit", format="json")
+                    console.print(f"\nSaved to {path}")
                 else:
-                    content = report.to_markdown()
+                    md_content = report.to_markdown()
                     if guide_comparison:
-                        content += "\n\n---\n\n" + guide_comparison.to_markdown()
-                path = save_report(content, "ui-audit", format=fmt)
-                console.print(f"\nSaved to {path}")
+                        md_content += "\n\n---\n\n" + guide_comparison.to_markdown()
+                    _save_ui_audit(md_content, "ui-audit", url)
 
     except Exception as exc:
         _friendly_exit(exc)
