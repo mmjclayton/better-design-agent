@@ -362,11 +362,20 @@ DOM_EXTRACTION_SCRIPT = """
     htmlAudit.has_global_focus_visible = false;
     htmlAudit.focus_visible_rules = [];
 
-    function walkCssRules(rules) {
+    // Also detect @media (hover: hover) gated hover rules
+    htmlAudit.has_hover_media_query = false;
+    htmlAudit.hover_rules_in_media_query = 0;
+
+    function walkCssRules(rules, insideHoverMedia) {
         for (const rule of rules) {
-            // Recurse into grouping rules (CSSMediaRule, CSSSupportsRule, etc.)
+            // Check for @media (hover: hover) grouping rules
             if (rule.cssRules) {
-                walkCssRules(rule.cssRules);
+                const condText = rule.conditionText || rule.media?.mediaText || '';
+                const isHoverMedia = condText.includes('hover: hover') || condText.includes('hover:hover');
+                if (isHoverMedia) {
+                    htmlAudit.has_hover_media_query = true;
+                }
+                walkCssRules(rule.cssRules, insideHoverMedia || isHoverMedia);
                 continue;
             }
             const sel = rule.selectorText || '';
@@ -379,18 +388,22 @@ DOM_EXTRACTION_SCRIPT = """
                     });
                 }
             }
+            // Count hover rules gated behind @media (hover: hover)
+            if (insideHoverMedia && sel.includes(':hover')) {
+                htmlAudit.hover_rules_in_media_query++;
+            }
         }
     }
 
     for (const sheet of document.styleSheets) {
         try {
-            walkCssRules(sheet.cssRules);
+            walkCssRules(sheet.cssRules, false);
         } catch (e) { /* cross-origin */ }
     }
     // Also check <style> tags for bundled styles
-    if (!htmlAudit.has_global_focus_visible) {
-        for (const styleEl of document.querySelectorAll('style')) {
-            const text = styleEl.textContent || '';
+    for (const styleEl of document.querySelectorAll('style')) {
+        const text = styleEl.textContent || '';
+        if (!htmlAudit.has_global_focus_visible) {
             if (text.includes(':focus-visible') || text.includes(':focus')) {
                 htmlAudit.has_global_focus_visible = true;
                 const matches = text.match(/[^{]*:focus-visible[^{]*\\{[^}]*\\}/g) || [];
@@ -401,6 +414,12 @@ DOM_EXTRACTION_SCRIPT = """
                     });
                 }
             }
+        }
+        // Check for @media (hover: hover) in bundled styles
+        if (!htmlAudit.has_hover_media_query && /\@media\s*\([^)]*hover\s*:\s*hover/.test(text)) {
+            htmlAudit.has_hover_media_query = true;
+            const hoverMatches = text.match(/:hover/g) || [];
+            htmlAudit.hover_rules_in_media_query += hoverMatches.length;
         }
     }
 

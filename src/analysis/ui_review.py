@@ -50,68 +50,54 @@ class CategoryScore:
 
 
 @dataclass
-class ProposedSystem:
-    """A cleaned-up design token system proposed from raw DOM data."""
-    colors: list[dict] = field(default_factory=list)       # [{name, value, role}]
-    font_sizes: list[dict] = field(default_factory=list)   # [{name, value}]
-    spacing: list[dict] = field(default_factory=list)      # [{name, value}]
-    font_families: list[dict] = field(default_factory=list)  # [{name, value, role}]
+class TokenAudit:
+    """Audit of the site's existing design token system.
 
-    def to_css(self) -> str:
-        """Output as CSS custom properties."""
-        lines = [":root {"]
-        if self.colors:
-            lines.append("  /* Colors */")
-            for c in self.colors:
-                lines.append(f"  --color-{c['name']}: {c['value']};")
-        if self.font_families:
-            lines.append("  /* Typography - Families */")
-            for f in self.font_families:
-                lines.append(f"  --font-{f['name']}: {f['value']};")
-        if self.font_sizes:
-            lines.append("  /* Typography - Scale */")
-            for s in self.font_sizes:
-                lines.append(f"  --text-{s['name']}: {s['value']};")
-        if self.spacing:
-            lines.append("  /* Spacing */")
-            for s in self.spacing:
-                lines.append(f"  --space-{s['name']}: {s['value']};")
-        lines.append("}")
-        return "\n".join(lines)
+    Reports what tokens are defined on :root, which are actually used,
+    and which hardcoded values should map to existing tokens.
+    """
+    existing_tokens: dict = field(default_factory=dict)  # {category: [{name, value}]}
+    hardcoded_values: list[dict] = field(default_factory=list)  # [{type, value, count, closest_token}]
+    token_count: int = 0
+    has_token_system: bool = False
 
     def to_dict(self) -> dict:
         return {
-            "colors": self.colors,
-            "font_sizes": self.font_sizes,
-            "spacing": self.spacing,
-            "font_families": self.font_families,
-            "css": self.to_css(),
+            "has_token_system": self.has_token_system,
+            "token_count": self.token_count,
+            "existing_tokens": self.existing_tokens,
+            "hardcoded_values": self.hardcoded_values,
         }
 
     def to_markdown(self) -> str:
-        lines = ["### Proposed Design System\n"]
-        lines.append(
-            "Based on the values found in your CSS, here's a cleaned-up "
-            "token system you can drop in.\n"
-        )
-        lines.append("```css")
-        lines.append(self.to_css())
-        lines.append("```\n")
+        if not self.has_token_system:
+            lines = ["### Design Token Audit\n"]
+            lines.append(
+                "No CSS custom properties found on `:root`. "
+                "Consider defining a design token system for maintainability.\n"
+            )
+            return "\n".join(lines)
 
-        if self.colors:
-            lines.append("**Colors:**")
-            for c in self.colors:
-                lines.append(f"- `--color-{c['name']}`: {c['value']} ({c.get('role', '')})")
-            lines.append("")
-        if self.font_sizes:
-            lines.append("**Type scale:**")
-            for s in self.font_sizes:
-                lines.append(f"- `--text-{s['name']}`: {s['value']}")
-            lines.append("")
-        if self.spacing:
-            lines.append("**Spacing scale:**")
-            for s in self.spacing:
-                lines.append(f"- `--space-{s['name']}`: {s['value']}")
+        lines = [
+            "### Design Token Audit\n",
+            f"**{self.token_count} tokens defined** on `:root`\n",
+        ]
+
+        for category, tokens in self.existing_tokens.items():
+            if tokens:
+                lines.append(f"**{category.title()} tokens ({len(tokens)}):**")
+                for t in tokens[:12]:
+                    lines.append(f"- `{t['name']}`: {t['value']}")
+                if len(tokens) > 12:
+                    lines.append(f"- ... +{len(tokens) - 12} more")
+                lines.append("")
+
+        if self.hardcoded_values:
+            lines.append(f"**Hardcoded values that could use tokens ({len(self.hardcoded_values)}):**")
+            for hv in self.hardcoded_values[:10]:
+                closest = hv.get("closest_token", "")
+                token_hint = f" (close to `{closest}`)" if closest else ""
+                lines.append(f"- {hv['type']} `{hv['value']}` used {hv['count']}x{token_hint}")
             lines.append("")
 
         return "\n".join(lines)
@@ -121,7 +107,8 @@ class ProposedSystem:
 class UIReviewReport:
     categories: list[CategoryScore] = field(default_factory=list)
     llm_suggestions: list[dict] = field(default_factory=list)
-    proposed_system: ProposedSystem | None = None
+    token_audit: TokenAudit | None = None
+    accessibility_summary: dict | None = None  # from WCAG checker
 
     @property
     def overall_score(self) -> float:
@@ -171,7 +158,8 @@ class UIReviewReport:
                 for c in self.categories
             },
             "llm_suggestions": self.llm_suggestions,
-            "proposed_system": self.proposed_system.to_dict() if self.proposed_system else None,
+            "token_audit": self.token_audit.to_dict() if self.token_audit else None,
+            "accessibility_summary": self.accessibility_summary,
         }
 
     def to_markdown(self) -> str:
@@ -216,8 +204,25 @@ class UIReviewReport:
             lines.append("")
 
         # Proposed design system
-        if self.proposed_system:
-            lines.append(self.proposed_system.to_markdown())
+        if self.token_audit:
+            lines.append(self.token_audit.to_markdown())
+
+        # Accessibility summary
+        if self.accessibility_summary:
+            a = self.accessibility_summary
+            lines.append("### Accessibility Summary\n")
+            lines.append(
+                f"**WCAG score: {a.get('score_percentage', 0)}%** — "
+                f"{a.get('pass', 0)} pass, {a.get('fail', 0)} fail, "
+                f"{a.get('warning', 0)} warning\n"
+            )
+            violations = a.get("top_violations", [])
+            if violations:
+                for v in violations:
+                    lines.append(f"- **{v.get('criterion', '')}** ({v.get('level', '')}): {v.get('details', '')}")
+                lines.append("")
+            else:
+                lines.append("No A/AA violations detected.\n")
 
         # LLM suggestions
         if self.llm_suggestions:
@@ -345,17 +350,18 @@ def _score_typography(dom_data: dict) -> CategoryScore:
             data={"sizes": [f"{s['size']} ({s['count']}x)" for s in sizes]},
         ))
 
-    # ── Modular scale check ──
+    # ── Modular scale check (informational — many production apps use pragmatic scales) ──
     if len(sizes_px) >= 4:
         ratio, on_scale = _check_modular_scale(sizes_px)
         scale_pct = on_scale / len(set(sizes_px)) if sizes_px else 0
         if scale_pct < 0.5:
-            score -= 10
+            # No penalty — pragmatic scales optimised for readability are valid
             findings.append(Finding(
                 category="typography",
-                message="Font sizes don't follow a recognisable modular scale.",
-                recommendation="Adopt a scale ratio (1.25 'major third' is a safe default) for harmonious sizing.",
-                severity="medium",
+                message=f"Font sizes use a pragmatic scale rather than a mathematical ratio ({on_scale}/{len(set(sizes_px))} sizes fit ratio {ratio}).",
+                recommendation="This is informational — pragmatic scales are often better at small sizes. "
+                    "Only a concern if sizes feel arbitrary rather than intentional.",
+                severity="low",
                 data={"best_ratio": ratio, "sizes_on_scale": f"{on_scale}/{len(set(sizes_px))}"},
             ))
 
@@ -471,41 +477,24 @@ def _score_color(dom_data: dict) -> CategoryScore:
                     data={"top_color": text_colors[0].get("color"), "dominance": f"{dominance:.0%}"},
                 ))
 
-    # ── 60-30-10 colour proportion rule ──
-    # Good design uses ~60% dominant, ~30% secondary, ~10% accent for backgrounds.
-    if bg_colors and len(bg_colors) >= 3:
-        total_bg_uses = sum(c.get("count", 0) for c in bg_colors)
-        if total_bg_uses > 0:
-            proportions = [c.get("count", 0) / total_bg_uses for c in bg_colors]
-            dominant = proportions[0]
-            secondary = proportions[1] if len(proportions) > 1 else 0
-            accent_sum = sum(proportions[2:]) if len(proportions) > 2 else 0
-
-            # Check for balanced distribution — dominant should be 45-75%
-            if dominant < 0.35:
-                score -= 8
-                findings.append(Finding(
-                    category="color",
-                    message=f"Background colours lack a clear dominant — top colour is only {dominant:.0%} of usage.",
-                    recommendation="The 60-30-10 rule: ~60% dominant surface, ~30% secondary, ~10% accent. "
-                        f"Currently: {dominant:.0%} / {secondary:.0%} / {accent_sum:.0%}.",
-                    severity="medium",
-                    data={
-                        "proportions": f"{dominant:.0%} / {secondary:.0%} / {accent_sum:.0%}",
-                        "ideal": "~60% / ~30% / ~10%",
-                    },
-                ))
-            elif dominant > 0.85 and len(bg_colors) >= 3:
-                # One colour dominates too heavily — may lack visual interest
-                score -= 3
-                findings.append(Finding(
-                    category="color",
-                    message=f"Background is {dominant:.0%} one colour — page may feel flat or monotonous.",
-                    recommendation="Introduce a secondary surface colour for cards, sections, or highlights "
-                        "to create visual depth.",
-                    severity="low",
-                    data={"dominant_proportion": f"{dominant:.0%}"},
-                ))
+    # ── Surface colour variety ──
+    # Check that the design uses multiple distinct surface layers (bg-base,
+    # bg-surface, bg-elevated).  Counting distinct colours is more reliable
+    # than element-count proportions — a page with a large app shell
+    # background will dominate by element count even when cards/inputs use
+    # separate surface colours.
+    if bg_colors:
+        # Count distinct bg colours with meaningful usage (>1 element)
+        meaningful_surfaces = [c for c in bg_colors if c.get("count", 0) > 1]
+        if len(meaningful_surfaces) < 2 and len(bg_colors) >= 2:
+            score -= 5
+            findings.append(Finding(
+                category="color",
+                message=f"Only {len(meaningful_surfaces)} background colour used more than once — page may lack surface depth.",
+                recommendation="Use 2-3 distinct surface colours (base, card/surface, elevated) to create visual layers.",
+                severity="low",
+                data={"distinct_surfaces": len(meaningful_surfaces), "total_bg_colors": len(bg_colors)},
+            ))
 
     return CategoryScore(name="color", score=score, findings=findings)
 
@@ -515,7 +504,13 @@ def _score_spacing(dom_data: dict) -> CategoryScore:
     findings: list[Finding] = []
     score = 100
 
-    spacing_values = dom_data.get("spacing_values", []) or []
+    raw_spacing = dom_data.get("spacing_values", []) or []
+    # Filter out 1-2px values — these are almost always borders or hairlines,
+    # not intentional spacing decisions.
+    spacing_values = [
+        s for s in raw_spacing
+        if (_parse_px(s.get("value", "")) or 0) >= 3
+    ]
     value_count = len(spacing_values)
 
     if not spacing_values:
@@ -681,13 +676,20 @@ def _score_interactive(dom_data: dict) -> CategoryScore:
             ))
 
     # ── Hover state coverage ──
+    # Check if hover rules are gated behind @media (hover: hover) — common
+    # pattern to prevent sticky hover on touch devices.  Playwright tests
+    # without the media query context, so it may see 0 hover changes even
+    # when hover styles are properly defined.
+    html = dom_data.get("html_structure", {}) or {}
+    has_hover_media = html.get("has_hover_media_query", False)
+    hover_rules_count = html.get("hover_rules_in_media_query", 0)
+
     if state_tests:
         has_hover_change = 0
         for st in state_tests:
             default = st.get("default_state", {}) or {}
             hover = st.get("hover_state", {}) or {}
             if hover and default:
-                # Check if any visual property changed on hover
                 changed = any(
                     hover.get(k) != default.get(k)
                     for k in ("backgroundColor", "color", "borderColor",
@@ -700,15 +702,26 @@ def _score_interactive(dom_data: dict) -> CategoryScore:
         if state_tests:
             hover_pct = has_hover_change / len(state_tests)
             if hover_pct < 0.5:
-                penalty = min(20, int((1 - hover_pct) * 25))
-                score -= penalty
-                findings.append(Finding(
-                    category="interactive",
-                    message=f"Only {hover_pct:.0%} of tested elements have a visible hover state change.",
-                    recommendation="Every interactive element should provide visual feedback on hover (colour, shadow, or transform).",
-                    severity="high" if hover_pct < 0.3 else "medium",
-                    data={"with_hover": has_hover_change, "total_tested": len(state_tests)},
-                ))
+                if has_hover_media and hover_rules_count > 0:
+                    # Hover styles exist but are gated — lower severity, different message
+                    score -= 5
+                    findings.append(Finding(
+                        category="interactive",
+                        message=f"Hover states gated behind @media (hover: hover) — {hover_rules_count} rules detected but not triggered in headless test.",
+                        recommendation="Hover styles are correctly gated for touch devices. Verify they work on desktop browsers.",
+                        severity="low",
+                        data={"hover_rules_in_media": hover_rules_count, "with_hover": has_hover_change, "total_tested": len(state_tests)},
+                    ))
+                else:
+                    penalty = min(20, int((1 - hover_pct) * 25))
+                    score -= penalty
+                    findings.append(Finding(
+                        category="interactive",
+                        message=f"Only {hover_pct:.0%} of tested elements have a visible hover state change.",
+                        recommendation="Every interactive element should provide visual feedback on hover (colour, shadow, or transform).",
+                        severity="high" if hover_pct < 0.3 else "medium",
+                        data={"with_hover": has_hover_change, "total_tested": len(state_tests)},
+                    ))
 
     # ── Size consistency ──
     # Buttons/links of similar type should be consistently sized
@@ -1015,34 +1028,40 @@ def _score_copy(dom_data: dict) -> CategoryScore:
                 ]},
             ))
 
-        # Check for verb-led labels (good practice)
-        non_generic = [el for el in labelled_elements if el not in generic]
-        if non_generic:
+        # Check for verb-led labels — only on action buttons, not navigation
+        # Navigation elements (links styled as tabs/nav) use noun labels by convention
+        action_elements = [
+            el for el in labelled_elements
+            if el not in generic
+            and el.get("element", "").startswith("button")
+            and not el.get("element", "").startswith("a")
+        ]
+        # If no explicit buttons, don't flag — the page may use links for everything
+        if len(action_elements) >= 2:
             verb_led = 0
-            for el in non_generic:
+            for el in action_elements:
                 first_word = el.get("text", "").strip().split()[0].lower() if el.get("text", "").strip() else ""
                 if first_word in ACTION_VERBS:
                     verb_led += 1
 
-            if len(non_generic) >= 3:
-                verb_pct = verb_led / len(non_generic)
-                if verb_pct < 0.3:
-                    score -= 10
-                    noun_labels = [
-                        el for el in non_generic
-                        if el.get("text", "").strip()
-                        and el.get("text", "").strip().split()[0].lower() not in ACTION_VERBS
-                    ]
-                    findings.append(Finding(
-                        category="copy",
-                        message=f"Only {verb_pct:.0%} of button labels start with an action verb.",
-                        recommendation="Lead with verbs: 'Get started', 'Create project', 'Download report'. "
-                            "Verbs tell users what will happen.",
-                        severity="medium",
-                        data={"noun_labels": [
-                            f"\"{el.get('text', '')}\"" for el in noun_labels[:5]
-                        ]},
-                    ))
+            verb_pct = verb_led / len(action_elements)
+            if verb_pct < 0.3:
+                score -= 10
+                noun_labels = [
+                    el for el in action_elements
+                    if el.get("text", "").strip()
+                    and el.get("text", "").strip().split()[0].lower() not in ACTION_VERBS
+                ]
+                findings.append(Finding(
+                    category="copy",
+                    message=f"Only {verb_pct:.0%} of action button labels start with a verb.",
+                    recommendation="Lead action buttons with verbs: 'Save changes', 'Create project'. "
+                        "Navigation labels (tabs, nav links) are fine as nouns.",
+                    severity="medium",
+                    data={"action_buttons": [
+                        f"\"{el.get('text', '')}\"" for el in noun_labels[:5]
+                    ]},
+                ))
 
         # Check for duplicate labels
         label_texts = [el.get("text", "").strip().lower() for el in labelled_elements if el.get("text", "").strip()]
@@ -1116,13 +1135,7 @@ def _score_copy(dom_data: dict) -> CategoryScore:
     return CategoryScore(name="copy", score=score, findings=findings)
 
 
-# ── Design system cleanup proposal ──
-
-# Named scale for proposed font sizes (ascending order)
-_SIZE_NAMES = ["xs", "sm", "base", "md", "lg", "xl", "2xl", "3xl", "4xl", "5xl"]
-
-# Named scale for proposed spacing (ascending order)
-_SPACE_NAMES = ["px", "0.5", "1", "1.5", "2", "3", "4", "5", "6", "8", "10", "12", "16", "20", "24"]
+# ── Design token audit ──
 
 
 def _hex_to_rgb(hex_str: str) -> tuple[int, int, int] | None:
@@ -1178,135 +1191,101 @@ def _cluster_colors(
     return clusters
 
 
-def _snap_to_grid(value: float, grid: int = 4) -> int:
-    """Snap a value to the nearest grid multiple."""
-    return max(grid, round(value / grid) * grid)
 
+def audit_tokens(dom_data: dict) -> TokenAudit:
+    """Audit the site's existing design token system.
 
-def generate_clean_system(dom_data: dict) -> ProposedSystem:
-    """Generate a proposed clean design token system from raw DOM data.
-
-    Clusters raw values into a disciplined palette, type scale, and
-    spacing scale. Pure data transformation — no LLM.
+    Reports existing :root tokens grouped by category, and flags
+    frequently-used hardcoded values that could map to an existing token.
+    Never invents token names or reassigns semantic meaning.
     """
-    fonts = dom_data.get("fonts", {}) or {}
+    css_tokens = dom_data.get("css_tokens", {}) or {}
     colors = dom_data.get("colors", {}) or {}
-    layout = dom_data.get("layout", {}) or {}
+    fonts = dom_data.get("fonts", {}) or {}
     spacing_values = dom_data.get("spacing_values", []) or []
 
-    # ── Colours ──
-    # Merge text and background colours, cluster by proximity
-    text_colors = colors.get("text", [])
-    bg_colors = colors.get("background", [])
+    # ── Gather existing tokens from :root ──
+    existing: dict[str, list[dict]] = {}
+    total_count = 0
+    for category, tokens in css_tokens.items():
+        if tokens:
+            existing[category] = [{"name": t.get("name", ""), "value": t.get("value", "")} for t in tokens]
+            total_count += len(tokens)
 
-    # Propose semantic roles from clustered background colours
-    bg_clusters = _cluster_colors(bg_colors, max_clusters=4)
-    text_clusters = _cluster_colors(text_colors, max_clusters=4)
+    has_system = total_count > 0
 
-    proposed_colors: list[dict] = []
-    bg_role_names = ["surface", "surface-alt", "surface-elevated", "surface-overlay"]
-    for i, cluster in enumerate(bg_clusters):
-        role = bg_role_names[i] if i < len(bg_role_names) else f"surface-{i+1}"
-        proposed_colors.append({
-            "name": role,
-            "value": cluster["value"],
-            "role": f"Background ({cluster['count']}x used)",
-        })
+    # ── Find hardcoded values that could use existing tokens ──
+    hardcoded: list[dict] = []
 
-    text_role_names = ["text-primary", "text-secondary", "text-muted", "text-accent"]
-    for i, cluster in enumerate(text_clusters):
-        role = text_role_names[i] if i < len(text_role_names) else f"text-{i+1}"
-        proposed_colors.append({
-            "name": role,
-            "value": cluster["value"],
-            "role": f"Text ({cluster['count']}x used)",
-        })
+    if has_system:
+        # Collect all token values for matching
+        color_tokens = {t["value"].strip().lower(): t["name"] for t in css_tokens.get("color", [])}
+        spacing_tokens = {t["value"].strip().lower(): t["name"] for t in css_tokens.get("spacing", [])}
+        font_tokens = {t["value"].strip().lower(): t["name"] for t in css_tokens.get("font", [])}
 
-    # ── Font families ──
-    families = fonts.get("families", [])
-    proposed_families: list[dict] = []
-    family_roles = ["body", "heading", "mono"]
-    for i, fam in enumerate(families[:3]):
-        role = family_roles[i] if i < len(family_roles) else f"font-{i+1}"
-        proposed_families.append({
-            "name": role,
-            "value": fam["family"],
-            "role": f"{role} font ({fam['count']}x used)",
-        })
+        # Check text colors against color tokens
+        for c in colors.get("text", []):
+            val = c.get("color", "").lower()
+            count = c.get("count", 0)
+            if count >= 5 and val and val not in color_tokens:
+                # Find closest token
+                closest = _find_closest_token_color(val, color_tokens)
+                hardcoded.append({
+                    "type": "color",
+                    "value": c["color"],
+                    "count": count,
+                    "closest_token": closest,
+                })
 
-    # ── Font sizes — build a clean scale ──
-    raw_sizes = fonts.get("sizes", [])
-    sizes_px = sorted(set(
-        v for s in raw_sizes if (v := _parse_px(s.get("size", ""))) is not None
-    ))
+        # Check bg colors against color tokens
+        for c in colors.get("background", []):
+            val = c.get("color", "").lower()
+            count = c.get("count", 0)
+            if count >= 3 and val and val not in color_tokens:
+                closest = _find_closest_token_color(val, color_tokens)
+                hardcoded.append({
+                    "type": "background",
+                    "value": c["color"],
+                    "count": count,
+                    "closest_token": closest,
+                })
 
-    proposed_sizes: list[dict] = []
-    if sizes_px:
-        # Pick the most-used size as "base", build a scale around it
-        most_used_size = max(raw_sizes, key=lambda s: s.get("count", 0)).get("size", "16px")
-        base_px = _parse_px(most_used_size) or 16
+        # Check font sizes against font tokens
+        for s in fonts.get("sizes", []):
+            val = s.get("size", "").strip().lower()
+            count = s.get("count", 0)
+            if count >= 5 and val and val not in font_tokens:
+                hardcoded.append({
+                    "type": "font-size",
+                    "value": s["size"],
+                    "count": count,
+                    "closest_token": "",
+                })
 
-        # Generate a modular scale with ratio 1.25 (major third)
-        ratio = 1.25
-        scale_values = []
+    # Sort by usage count descending — most-used orphans first
+    hardcoded.sort(key=lambda h: -h.get("count", 0))
 
-        # Build downward from base
-        current = base_px
-        down_values = []
-        for _ in range(3):
-            current = current / ratio
-            rounded = max(10, round(current))
-            if rounded not in down_values:
-                down_values.append(rounded)
-        down_values.reverse()
-
-        # Base
-        scale_values = down_values + [round(base_px)]
-
-        # Build upward from base
-        current = base_px
-        for _ in range(6):
-            current = current * ratio
-            rounded = round(current)
-            if rounded not in scale_values:
-                scale_values.append(rounded)
-
-        # Trim to reasonable size and name them
-        scale_values = sorted(set(scale_values))[:len(_SIZE_NAMES)]
-        for i, px in enumerate(scale_values):
-            name = _SIZE_NAMES[i] if i < len(_SIZE_NAMES) else f"size-{i}"
-            proposed_sizes.append({"name": name, "value": f"{px}px"})
-
-    # ── Spacing — snap to an 8px grid ──
-    raw_px = sorted(set(
-        v for s in spacing_values if (v := _parse_px(s.get("value", ""))) is not None
-    ))
-
-    proposed_spacing: list[dict] = []
-    if raw_px:
-        # Build an 8-point grid scale
-        grid_values = [4, 8, 12, 16, 24, 32, 48, 64, 96, 128]
-        # Filter to values that are actually near something in the raw data
-        used_grid = []
-        for gv in grid_values:
-            # Check if any raw value is within 4px of this grid value
-            if any(abs(rv - gv) <= 4 for rv in raw_px):
-                used_grid.append(gv)
-
-        # Always include at least the core scale
-        if not used_grid:
-            used_grid = [4, 8, 16, 24, 32, 48, 64]
-
-        for i, px in enumerate(used_grid):
-            name = _SPACE_NAMES[i] if i < len(_SPACE_NAMES) else f"space-{i}"
-            proposed_spacing.append({"name": name, "value": f"{px}px"})
-
-    return ProposedSystem(
-        colors=proposed_colors,
-        font_sizes=proposed_sizes,
-        spacing=proposed_spacing,
-        font_families=proposed_families,
+    return TokenAudit(
+        existing_tokens=existing,
+        hardcoded_values=hardcoded[:15],
+        token_count=total_count,
+        has_token_system=has_system,
     )
+
+
+def _find_closest_token_color(hex_val: str, token_map: dict[str, str]) -> str:
+    """Find the closest color token to a hex value."""
+    best_name = ""
+    best_dist = float("inf")
+    for token_val, token_name in token_map.items():
+        dist = _color_distance(
+            _hex_to_rgb(hex_val) or (0, 0, 0),
+            _hex_to_rgb(token_val) or (0, 0, 0),
+        )
+        if dist < best_dist and dist < 80:  # only suggest if reasonably close
+            best_dist = dist
+            best_name = token_name
+    return best_name
 
 
 # ── Main entry point ──
@@ -1341,9 +1320,33 @@ def run_ui_review(dom_data: dict) -> UIReviewReport:
         _score_copy(dom_data),
     ]
 
-    proposed_system = generate_clean_system(dom_data)
+    token_audit_result = audit_tokens(dom_data)
 
-    return UIReviewReport(categories=categories, proposed_system=proposed_system)
+    # Run WCAG accessibility check and extract summary
+    accessibility = None
+    try:
+        from src.analysis.wcag_checker import run_wcag_check
+        wcag_report = run_wcag_check(dom_data)
+        top_violations = [
+            {"criterion": r.criterion, "level": r.level, "details": r.details, "count": r.count}
+            for r in wcag_report.results
+            if r.status == "fail" and r.level in ("A", "AA")
+        ][:5]
+        accessibility = {
+            "score_percentage": wcag_report.score_percentage,
+            "pass": wcag_report.pass_count,
+            "fail": wcag_report.fail_count,
+            "warning": wcag_report.warning_count,
+            "top_violations": top_violations,
+        }
+    except Exception:
+        pass
+
+    return UIReviewReport(
+        categories=categories,
+        token_audit=token_audit_result,
+        accessibility_summary=accessibility,
+    )
 
 
 # ── Responsive comparison ──

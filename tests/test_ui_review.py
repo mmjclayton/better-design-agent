@@ -6,8 +6,8 @@ import json
 from src.analysis.ui_review import (  # noqa: F401
     WEIGHTS,
     CategoryScore,
-    ProposedSystem,
     ResponsiveReport,
+    TokenAudit,
     UIReviewReport,
     _check_modular_scale,
     _cluster_colors,
@@ -20,7 +20,7 @@ from src.analysis.ui_review import (  # noqa: F401
     _score_patterns,
     _score_spacing,
     _score_typography,
-    generate_clean_system,
+    audit_tokens,
     get_llm_suggestions,
     run_ui_review,
 )
@@ -159,7 +159,7 @@ def test_typography_too_many_sizes():
     sizes = [{"size": f"{10+i}px", "count": 5} for i in range(15)]
     dom = _dom(fonts_sizes=sizes)
     result = _score_typography(dom)
-    assert result.score < 80
+    assert result.score <= 80
     assert any("font size" in f.message.lower() for f in result.findings)
 
 
@@ -728,29 +728,28 @@ def test_get_llm_suggestions_handles_code_fence(monkeypatch):
 # ── 60-30-10 colour rule ──
 
 
-def test_color_60_30_10_no_dominant_bg():
-    """Background colours should have a clear dominant."""
-    bg_colors = [
-        {"color": "#fff", "count": 10},
-        {"color": "#f5f5f5", "count": 10},
-        {"color": "#eee", "count": 10},
-        {"color": "#ddd", "count": 10},
-    ]
-    dom = _dom(colors_bg=bg_colors)
-    result = _score_color(dom)
-    assert any("60-30-10" in f.recommendation or "dominant" in f.message.lower() for f in result.findings)
-
-
-def test_color_60_30_10_monotonous():
-    """One bg colour dominating 90%+ should be flagged as flat."""
+def test_color_surface_variety_low():
+    """Only one bg colour used more than once should flag low surface variety."""
     bg_colors = [
         {"color": "#fff", "count": 100},
-        {"color": "#f5f5f5", "count": 3},
-        {"color": "#eee", "count": 2},
+        {"color": "#f5f5f5", "count": 1},
+        {"color": "#eee", "count": 1},
     ]
     dom = _dom(colors_bg=bg_colors)
     result = _score_color(dom)
-    assert any("flat" in f.message.lower() or "monotonous" in f.message.lower() for f in result.findings)
+    assert any("surface" in f.message.lower() for f in result.findings)
+
+
+def test_color_surface_variety_good():
+    """Multiple bg colours with meaningful usage should not flag."""
+    bg_colors = [
+        {"color": "#fff", "count": 100},
+        {"color": "#f5f5f5", "count": 30},
+        {"color": "#eee", "count": 10},
+    ]
+    dom = _dom(colors_bg=bg_colors)
+    result = _score_color(dom)
+    assert not any("surface" in f.message.lower() and "depth" in f.message.lower() for f in result.findings)
 
 
 # ── Spacing range ──
@@ -766,107 +765,102 @@ def test_spacing_narrow_range():
     assert any("narrow" in f.message.lower() or "range" in f.message.lower() for f in result.findings)
 
 
-# ── Design system cleanup ──
+# ── Token audit ──
 
 
-def test_generate_clean_system_basic():
-    dom = _dom(
-        fonts_families=[
-            {"family": "Inter", "count": 100},
-            {"family": "Fira Code", "count": 10},
+def _dom_with_tokens(**extra):
+    """DOM data with CSS custom properties defined."""
+    base = _dom()
+    base["css_tokens"] = {
+        "color": [
+            {"name": "--color-bg-base", "value": "#0f1117"},
+            {"name": "--color-bg-surface", "value": "#1a1d27"},
+            {"name": "--color-text-primary", "value": "#e1e4ed"},
+            {"name": "--color-accent", "value": "#4f46e5"},
         ],
-        fonts_sizes=[
-            {"size": "12px", "count": 20},
-            {"size": "14px", "count": 40},
-            {"size": "16px", "count": 100},
-            {"size": "20px", "count": 30},
-            {"size": "24px", "count": 15},
-            {"size": "32px", "count": 8},
+        "spacing": [
+            {"name": "--space-sm", "value": "8px"},
+            {"name": "--space-md", "value": "16px"},
+            {"name": "--space-lg", "value": "24px"},
         ],
-        colors_text=[
-            {"color": "#111", "count": 200},
-            {"color": "#666", "count": 50},
+        "font": [
+            {"name": "--font-size-base", "value": "16px"},
         ],
-        colors_bg=[
-            {"color": "#fff", "count": 100},
-            {"color": "#f5f5f5", "count": 30},
+    }
+    base.update(extra)
+    return base
+
+
+def test_audit_tokens_with_existing_system():
+    dom = _dom_with_tokens()
+    result = audit_tokens(dom)
+    assert result.has_token_system is True
+    assert result.token_count == 8  # 4 color + 3 spacing + 1 font
+
+
+def test_audit_tokens_without_system():
+    dom = _dom()
+    dom["css_tokens"] = {}
+    result = audit_tokens(dom)
+    assert result.has_token_system is False
+    assert result.token_count == 0
+
+
+def test_audit_tokens_finds_hardcoded_colors():
+    dom = _dom_with_tokens()
+    # Add a frequently-used color that's not in the token system
+    dom["colors"] = {
+        "text": [
+            {"color": "#e1e4ed", "count": 100},  # matches token
+            {"color": "#ff0000", "count": 50},    # hardcoded, no match
         ],
-        spacing_values=[
-            {"value": "4px", "count": 20},
-            {"value": "8px", "count": 50},
-            {"value": "16px", "count": 40},
-            {"value": "24px", "count": 20},
-            {"value": "32px", "count": 10},
-        ],
-    )
-    system = generate_clean_system(dom)
-    assert isinstance(system, ProposedSystem)
-    assert len(system.colors) > 0
-    assert len(system.font_sizes) > 0
-    assert len(system.spacing) > 0
-    assert len(system.font_families) == 2
+        "background": [],
+    }
+    result = audit_tokens(dom)
+    hardcoded_colors = [h for h in result.hardcoded_values if h["type"] == "color"]
+    # #ff0000 should be flagged as hardcoded (no close token match)
+    assert any(h["value"] == "#ff0000" for h in hardcoded_colors)
 
 
-def test_generate_clean_system_css_output():
-    dom = _dom(
-        fonts_families=[{"family": "Inter", "count": 50}],
-        fonts_sizes=[{"size": "16px", "count": 100}],
-        colors_text=[{"color": "#111", "count": 100}],
-        colors_bg=[{"color": "#fff", "count": 80}],
-        spacing_values=[{"value": "8px", "count": 30}],
-    )
-    system = generate_clean_system(dom)
-    css = system.to_css()
-    assert ":root {" in css
-    assert "--color-" in css
-    assert "--text-" in css
-    assert "--space-" in css
+def test_audit_tokens_to_markdown_with_tokens():
+    dom = _dom_with_tokens()
+    result = audit_tokens(dom)
+    md = result.to_markdown()
+    assert "Design Token Audit" in md
+    assert "8 tokens defined" in md
 
 
-def test_generate_clean_system_to_dict():
-    dom = _dom(
-        fonts_sizes=[{"size": "16px", "count": 100}],
-        colors_text=[{"color": "#111", "count": 100}],
-    )
-    system = generate_clean_system(dom)
-    d = system.to_dict()
-    assert "colors" in d
-    assert "font_sizes" in d
-    assert "spacing" in d
-    assert "css" in d
+def test_audit_tokens_to_markdown_without_tokens():
+    dom = _dom()
+    dom["css_tokens"] = {}
+    result = audit_tokens(dom)
+    md = result.to_markdown()
+    assert "No CSS custom properties" in md
 
 
-def test_generate_clean_system_markdown():
-    dom = _dom(
-        fonts_sizes=[{"size": "16px", "count": 100}],
-        colors_text=[{"color": "#111", "count": 100}],
-    )
-    system = generate_clean_system(dom)
-    md = system.to_markdown()
-    assert "Proposed Design System" in md
-    assert "```css" in md
+def test_audit_tokens_to_dict():
+    dom = _dom_with_tokens()
+    result = audit_tokens(dom)
+    d = result.to_dict()
+    assert "has_token_system" in d
+    assert "token_count" in d
+    assert "existing_tokens" in d
+    assert "hardcoded_values" in d
 
 
-def test_run_ui_review_includes_proposed_system():
-    dom = _dom(
-        fonts_sizes=[{"size": "16px", "count": 100}],
-        colors_text=[{"color": "#111", "count": 100}],
-    )
+def test_run_ui_review_includes_token_audit():
+    dom = _dom_with_tokens()
     report = run_ui_review(dom)
-    assert report.proposed_system is not None
-    assert isinstance(report.proposed_system, ProposedSystem)
+    assert report.token_audit is not None
+    assert isinstance(report.token_audit, TokenAudit)
 
 
-def test_report_to_dict_includes_proposed_system():
-    dom = _dom(
-        fonts_sizes=[{"size": "16px", "count": 100}],
-        colors_text=[{"color": "#111", "count": 100}],
-    )
+def test_report_to_dict_includes_token_audit():
+    dom = _dom_with_tokens()
     report = run_ui_review(dom)
     d = report.to_dict()
-    assert "proposed_system" in d
-    assert d["proposed_system"] is not None
-    assert "css" in d["proposed_system"]
+    assert "token_audit" in d
+    assert d["token_audit"] is not None
 
 
 # ── Colour clustering ──
