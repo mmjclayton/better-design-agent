@@ -24,7 +24,7 @@ def _get_version() -> str:
     """Read the installed package version."""
     try:
         from importlib.metadata import version as pkg_version
-        return pkg_version("design-intelligence")
+        return pkg_version("design-intel")
     except Exception:
         return "0.0.0-dev"
 

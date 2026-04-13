@@ -1,5 +1,5 @@
 [project]
-name = "design-intelligence"
+name = "design-intel"
 version = "0.1.0"
 description = "Agent-based platform for expert-level UX/UI design feedback, style guides, and design specifications"
 readme = "README.md"

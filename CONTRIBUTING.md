@@ -7,8 +7,8 @@ development environment, run the test suite, and submit changes.
 
 ```bash
 # Clone the repo
-git clone https://github.com/mmjclayton/design-intelligence.git
-cd design-intelligence
+git clone https://github.com/mmjclayton/design-intel.git
+cd design-intel
 
 # Create a virtual environment and install in editable mode
 python -m venv .venv

@@ -35,7 +35,7 @@ jobs:
 
       - name: Install design-intel
         run: |
-          pip install design-intelligence
+          pip install design-intel
           playwright install --with-deps chromium
 
       - name: Run CI gate (pragmatic mode by default)

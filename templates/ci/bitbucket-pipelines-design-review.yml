@@ -19,7 +19,7 @@ pipelines:
           name: Design Review
           image: python:3.12-slim
           script:
-            - pip install design-intelligence
+            - pip install design-intel
             - playwright install --with-deps chromium
             - |
               design-intel ci \

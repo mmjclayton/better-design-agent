@@ -17,7 +17,7 @@ design-review:
   variables:
     DESIGN_REVIEW_URL: https://preview.example.com
   before_script:
-    - pip install design-intelligence
+    - pip install design-intel
     - playwright install --with-deps chromium
   script:
     - |
