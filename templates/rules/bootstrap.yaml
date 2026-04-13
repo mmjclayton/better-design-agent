@@ -1,0 +1,44 @@
+# Brand rules for Bootstrap 5 projects.
+#
+# Validates that your site uses Bootstrap's default design tokens.
+# Customise to match your $theme-colors and _variables.scss overrides.
+#
+# Usage: copy to .design-intel/rules.yaml or run `design-intel init --framework bootstrap`
+
+version: 1
+
+allowed_fonts:
+  - system-ui
+  - -apple-system
+  - Segoe UI
+  - Roboto
+  - Helvetica Neue
+  - SFMono-Regular
+
+# Bootstrap 5 default theme grays + contextual colors
+allowed_colours:
+  text:
+    - "#000000"
+    - "#212529"   # $body-color
+    - "#495057"   # $gray-700
+    - "#6c757d"   # $secondary / $gray-600
+    - "#adb5bd"   # $gray-500
+    - "#ffffff"
+  background:
+    - "#ffffff"
+    - "#f8f9fa"   # $gray-100
+    - "#e9ecef"   # $gray-200
+    - "#dee2e6"   # $gray-300
+    - "#212529"   # $gray-900
+
+# Bootstrap default base font size is 16px (1rem)
+min_font_size: 14
+
+# Bootstrap CSS custom properties (v5.3+)
+required_tokens:
+  - --bs-body-font-family
+  - --bs-body-color
+  - --bs-body-bg
+  - --bs-primary
+
+forbidden_tokens: []

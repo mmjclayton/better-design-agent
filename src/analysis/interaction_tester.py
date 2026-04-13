@@ -7,7 +7,6 @@ empty states, checks overflow — and reports what happens. No LLM involved.
 
 import asyncio
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from playwright.async_api import async_playwright
 
@@ -207,14 +206,14 @@ async def _test_form_validation(page) -> list[InteractionTestResult]:
                 results.append(InteractionTestResult(
                     f"Required field validation: {inp['name'] or inp['placeholder']}",
                     "fail",
-                    f"Required input shows no error state when left empty",
+                    "Required input shows no error state when left empty",
                     element=selector,
                 ))
             elif error_visible:
                 results.append(InteractionTestResult(
                     f"Required field validation: {inp['name'] or inp['placeholder']}",
                     "pass",
-                    f"Input shows error state when required field is empty",
+                    "Input shows error state when required field is empty",
                     element=selector,
                 ))
 

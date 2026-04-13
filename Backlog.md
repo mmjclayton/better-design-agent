@@ -1,46 +1,167 @@
-# Backlog
+# design-intel: Backlog
 
-Tactical source of truth for work in flight and committed to ship. Paired with
-`../design-agent-private/ROADMAP.md` (private, strategic) — the roadmap holds
-the prioritised horizon and the complete shipped history, this file holds items
-we've committed to and written specs for.
+Single source of truth for work items. Never delete without trace: update in place, mark superseded, or archive.
 
-Work flow: **ROADMAP → Backlog → DONE**. Items live in ROADMAP until we're
-ready to pick them up; at that point they're promoted here with full
-acceptance criteria. On ship, status becomes `[DONE - YYYY-MM-DD]` here **and**
-the item moves to the COMPLETE table in ROADMAP.
+## Tag Taxonomy
 
-## Tag taxonomy
+Status (first): `[OPEN]` | `[IN PROGRESS]` | `[BLOCKED]` | `[SHIPPED - YYYY-MM-DD]` | `[VERIFIED - YYYY-MM-DD]` | `[WON'T]`
+Type (second): `[Feature]` | `[Iteration]` | `[Bug]` | `[Refactor]` | `[Infra]`
 
-Every item heading: `## [STATUS] [Type] Title`
+**Tag rules:**
+- Status first, type second. Never reverse.
+- `[WON'T]` requires inline reason: `[WON'T] [Type] Reason: [explanation or superseding P-number]`
+- `[VERIFIED]` = tested in production or confirmed accurate
+- P-numbers are sequential, never reused, do not imply priority
+- Acceptance criteria must be CLI-observable (commands, flags, files, exit codes, stdout patterns)
+- Status changes ship in the same commit as the code
+- Never delete items. Move to Shipped Archive when Backlog exceeds ~2,000 lines (items >90 days old).
 
-**Status:** `[OPEN]` · `[IN PROGRESS]` · `[BLOCKED]` · `[DONE - YYYY-MM-DD]`
+## P-Numbered Items
 
-**Type:**
-- `[Feature]` — product capabilities surfaced to end-users
-- `[Infra]` — dev-loop, tooling, CI, Claude Code config
-- `[Refactor]` — planned internal cleanup (unplanned refactors remain out of scope)
-
-`[Iteration]` and `[Bug]` tags are intentionally omitted until the project
-has external users.
-
-## Rules
-
-- Read this file at session start before any code changes.
-- Never invent work outside the backlog — add an `[OPEN]` entry first, or get
-  explicit user approval for a one-off exception.
-- Acceptance criteria must be CLI-observable (commands, flags, files, exit
-  codes, stdout patterns).
-- Status changes ship in the **same commit** as the code change, not separately.
-- Verify every acceptance criterion before marking `[DONE]`.
-- Never delete items. Done items stay as audit trail.
-- No external tracker sync — this file is the only system of record.
-
-Items are ordered: In Progress → Blocked → Open → Done (most recent first).
+Items ordered: In Progress > Blocked > Open > Shipped (most recent first).
 
 ---
 
-## [DONE - 2026-04-06] [Feature] Opinionated UI Review — design-intel ui-audit
+## [SHIPPED - 2026-04-08] [Feature] Quick Score Command — design-intel check
+
+**Summary.** Zero-config, no-LLM command that prints a single design quality
+score line to stdout. Pipe-friendly with `--json` and `--threshold` flags.
+
+**Acceptance criteria.**
+1. `design-intel check https://example.com` prints `<url> <score>/100 (<categories>)` to stdout.
+2. `--json` outputs parseable JSON with url, score, and categories.
+3. `--threshold N` exits 0 if score >= N, exits 1 if below.
+4. `--device <preset>` selects viewport. Unknown devices exit 2.
+5. All status/progress output goes to stderr (pipe-clean stdout).
+6. 8 unit tests pass in `tests/test_check.py`.
+
+---
+
+## [SHIPPED - 2026-04-08] [Infra] Version and Doctor Commands
+
+**Summary.** `design-intel --version` prints version. `design-intel version`
+prints version + Python + Playwright info. `design-intel doctor` validates
+environment: Python version, Playwright, Chromium, API keys, .design-intel/
+directory, network connectivity.
+
+**Acceptance criteria.**
+1. `design-intel --version` prints `design-intel <version>` and exits 0.
+2. `design-intel version` prints version, Python version, Playwright version.
+3. `design-intel doctor` checks 7 items: Python, design-intel, Playwright,
+   Chromium, API keys, .design-intel/, network. Exits 0 if all pass, 1 if warnings.
+4. 6 unit tests pass across `tests/test_version.py` and `tests/test_doctor.py`.
+
+---
+
+## [SHIPPED - 2026-04-08] [Infra] Community Scaffolding
+
+**Summary.** Community contribution infrastructure: CONTRIBUTING.md,
+CHANGELOG.md, GitHub issue templates (bug report, feature request), PR template.
+
+**Acceptance criteria.**
+1. `CONTRIBUTING.md` exists with dev setup, test commands, and how-to-add-an-analyser guide.
+2. `CHANGELOG.md` exists with retroactive 0.1.0 entry and unreleased section.
+3. `.github/ISSUE_TEMPLATE/bug_report.md` and `feature_request.md` exist.
+4. `.github/PULL_REQUEST_TEMPLATE.md` exists.
+
+---
+
+## [SHIPPED - 2026-04-08] [Feature] Framework Rule Templates + CI Templates
+
+**Summary.** Pre-built `rules.yaml` templates for Tailwind, Material Design,
+Bootstrap, and Shadcn/ui. CI pipeline templates for GitLab and Bitbucket.
+`design-intel init --framework <name>` copies the matching template.
+
+**Acceptance criteria.**
+1. `templates/rules/tailwind-default.yaml`, `material-design.yaml`,
+   `bootstrap.yaml`, `shadcn-ui.yaml` exist with correct brand rules.
+2. `templates/ci/gitlab-ci-design-review.yml` and
+   `bitbucket-pipelines-design-review.yml` exist.
+3. `templates/ci/README.md` documents all templates.
+4. `design-intel init --framework tailwind` copies the template to
+   `.design-intel/rules.yaml`.
+
+---
+
+## P3 [OPEN] [Feature] GitHub PR Comment Integration
+
+**Summary.** `design-intel ci --url X --github-comment` posts a structured PR
+comment with score, violation table, and inline fix suggestions using the
+GitHub API.
+
+**Context.** The current CI gate uploads a JSON artifact. Developers don't
+read artifacts — they read PR comments. ESLint, Lighthouse CI, and Codecov
+all post PR comments; this is the pattern that makes CI gates visible.
+
+**Acceptance criteria.**
+1. `--github-comment` flag on `ci` command posts a markdown comment to the
+   current PR via GitHub API using `$GITHUB_TOKEN`.
+2. Comment includes: overall score, new/fixed/persistent violation counts,
+   top 5 violations with fix suggestions, pass/fail verdict.
+3. Requires `GITHUB_TOKEN` env var; skips with a warning if not set.
+4. Works in GitHub Actions (reads PR number from `$GITHUB_EVENT_PATH`).
+5. Unit tests mock the GitHub API call and verify comment formatting.
+
+---
+
+## P4 [OPEN] [Feature] Published GitHub Action
+
+**Summary.** `uses: mmjclayton/design-intel-action@v1` — a published GitHub
+Action that reduces CI setup from 8+ lines to 3.
+
+**Context.** The current GitHub Actions template requires manual Python setup,
+pip install, and Playwright browser installation. A published action removes
+all friction. pa11y and Lighthouse both have published actions.
+
+**Acceptance criteria.**
+1. `action.yml` with inputs: url, mode, min-score, github-token.
+2. Dockerfile or composite action that installs design-intel + Chromium.
+3. Posts PR comment when github-token is provided.
+4. Published to GitHub Marketplace.
+5. README section with 3-line usage example.
+
+---
+
+## P6 [OPEN] [Feature] Violation Explainer: design-intel explain
+
+**Summary.** `design-intel explain 1.4.3` returns what the WCAG criterion
+means, why it matters, how to fix it, and spec links. Optionally scoped to a
+URL to show specific affected elements.
+
+**Context.** When CI gates fail, developers Google the criterion ID. This
+command gives a contextualized answer using the existing 39-entry knowledge
+library, saving a round-trip to the spec.
+
+**Acceptance criteria.**
+1. `design-intel explain 1.4.3` prints criterion explanation, user impact,
+   fix guidance, and WCAG spec link.
+2. `design-intel explain "target size"` fuzzy-matches criterion by name.
+3. `--url X` adds the specific elements on that page that violate the criterion.
+4. Uses knowledge library entries; falls back to LLM for criteria not covered.
+5. Unit tests verify lookup, fuzzy matching, and output formatting.
+
+---
+
+## P7 [OPEN] [Feature] Framework-Aware Fix Suggestions: design-intel suggest
+
+**Summary.** Extends `fix` with framework translation: instead of raw CSS,
+emits Tailwind classes, React/JSX diffs, or Bootstrap class changes.
+
+**Context.** `design-intel fix` generates raw CSS patches. Most frontend
+developers write Tailwind or React, not raw CSS. Bridging this gap makes
+fixes immediately actionable.
+
+**Acceptance criteria.**
+1. `design-intel suggest --url X --framework tailwind` maps hex values to
+   nearest Tailwind color class and emits class-based fixes.
+2. `--framework react` emits JSX diffs.
+3. `--framework bootstrap` emits Bootstrap class changes.
+4. Auto-detects framework from DOM heuristics when `--framework` is omitted.
+5. Unit tests verify translation for each framework.
+
+---
+
+## [SHIPPED - 2026-04-06] [Feature] Opinionated UI Review — design-intel ui-audit
 
 **Summary.** New `review` subcommand that performs an opinionated UI/UX
 quality audit on a live URL. Combines deterministic CSS/DOM analysis
@@ -117,7 +238,7 @@ CSS values — when it says "you have 14 font sizes", it lists them.
 
 ---
 
-## [DONE - 2026-04-05] [Feature] User Flow Analysis — design-intel flow
+## [SHIPPED - 2026-04-05] [Feature] User Flow Analysis — design-intel flow
 
 **Summary.** New `flow` subcommand that executes a multi-step user journey
 (signup, checkout, onboarding) via Playwright, captures screenshots + DOM
@@ -208,7 +329,7 @@ Playwright test fixtures. Maintainable, debuggable, no LLM dependency.
 
 ---
 
-## [DONE - 2026-04-05] [Infra] Ship-ready polish — init command + project config + README quickstart
+## [SHIPPED - 2026-04-05] [Infra] Ship-ready polish — init command + project config + README quickstart
 
 **Summary.** Trivial-but-impactful pre-distribution polish: a first-run
 `init` command, project-local `.design-intel/config.yaml` with env-var
@@ -241,7 +362,7 @@ README. All in service of getting the tool ready to show strangers.
 
 ---
 
-## [DONE - 2026-04-05] [Feature] Autopilot — LLM-driven autonomous review
+## [SHIPPED - 2026-04-05] [Feature] Autopilot — LLM-driven autonomous review
 
 **Summary.** New `autopilot` subcommand that lets Claude drive the browser
 autonomously: user provides a URL + a natural-language goal, design-intel
@@ -312,7 +433,7 @@ explicitly asked for the choice between modes.
 
 ---
 
-## [DONE - 2026-04-05] [Feature] UX sweep — login detection, friendly errors, progress, shim
+## [SHIPPED - 2026-04-05] [Feature] UX sweep — login detection, friendly errors, progress, shim
 
 **Summary.** Four coordinated UX improvements shipped together: auto-detect
 when a URL returns a login page, translate technical errors into plain
@@ -366,7 +487,7 @@ seconds, and they have to type `.venv/bin/design-intel` every invocation.
 
 ---
 
-## [DONE - 2026-04-05] [Feature] Interactive review + pragmatic-mode flags
+## [SHIPPED - 2026-04-05] [Feature] Interactive review + pragmatic-mode flags
 
 **Summary.** Two connected additions: (1) a `--pragmatic` flag on the
 review commands (`critique`, `wcag`, `components`) that filters output to
@@ -458,7 +579,7 @@ polish pass on the tools we already shipped.
 
 ---
 
-## [DONE - 2026-04-05] [Feature] Custom Design Rules — design-intel brand-check
+## [SHIPPED - 2026-04-05] [Feature] Custom Design Rules — design-intel brand-check
 
 **Summary.** New `brand-check` subcommand that reads a `.design-intel/rules.yaml`
 file from the project, validates the live site's DOM against it, and emits
@@ -540,7 +661,7 @@ everywhere." Currently there's no way to encode those rules machine-readably.
 
 ---
 
-## [DONE - 2026-04-05] [Feature] PDF Export — `--pdf` flag on saved reports
+## [SHIPPED - 2026-04-05] [Feature] PDF Export — `--pdf` flag on saved reports
 
 **Summary.** Extend the existing HTML report pipeline so critiques can be
 exported as a polished PDF (cover page, table of contents, page numbers,
@@ -609,7 +730,7 @@ generation adds no new dependencies.
 
 ---
 
-## [DONE - 2026-04-05] [Feature] Design System Extractor — design-intel extract-system
+## [SHIPPED - 2026-04-05] [Feature] Design System Extractor — design-intel extract-system
 
 **Summary.** New `extract-system` subcommand that reverse-engineers a
 complete design-token system from a live URL and writes CSS, JSON, and
@@ -694,7 +815,7 @@ a complete system in 30 seconds" promise needs dedicated code.
 
 ---
 
-## [DONE - 2026-04-05] [Feature] Scheduled Monitoring — design-intel monitor subcommand
+## [SHIPPED - 2026-04-05] [Feature] Scheduled Monitoring — design-intel monitor subcommand
 
 **Summary.** New `monitor` subcommand that runs an audit, compares against
 history, detects regressions, emits a trend-aware report, and optionally
@@ -782,7 +903,7 @@ stateless CLI that does one thing. Alerts are fire-and-forget HTTP POSTs.
 
 ---
 
-## [DONE - 2026-04-05] [Feature] Before/After Diff — design-intel diff subcommand
+## [SHIPPED - 2026-04-05] [Feature] Before/After Diff — design-intel diff subcommand
 
 **Summary.** New `diff` subcommand that compares two designs (URLs,
 screenshots, or a URL vs its history baseline) and produces a visual diff,
@@ -867,7 +988,7 @@ originally; renamed on promotion.
 
 ---
 
-## [DONE - 2026-04-05] [Feature] CI/CD Integration — design-intel ci subcommand
+## [SHIPPED - 2026-04-05] [Feature] CI/CD Integration — design-intel ci subcommand
 
 **Summary.** Add a `ci` subcommand that runs a deterministic design audit on a
 URL and exits non-zero based on configured thresholds, so CI pipelines can
@@ -957,7 +1078,7 @@ baseline files can be added later if users request them.
 
 ---
 
-## [DONE - 2026-04-05] [Feature] Competitive Benchmarking
+## [SHIPPED - 2026-04-05] [Feature] Competitive Benchmarking
 
 **Shipped.** `design-intel compare --url X --competitor Y` scores both sites
 across 10 deterministic metrics (WCAG score, violations, contrast pass rate,
@@ -968,7 +1089,7 @@ MCP tool. 18 unit tests + dedicated benchmark (100/100: metric count, winner
 correctness, symmetry, tie handling, lower-is-better discipline, markdown
 shape).
 
-## [DONE - 2026-04-05] [Infra] claude-code-action workflow
+## [SHIPPED - 2026-04-05] [Infra] claude-code-action workflow
 
 **Shipped.** `.github/workflows/claude-review.yml` triggers on `@claude`
 mentions in PR comments, PR review comments, PR reviews, and issue
@@ -976,7 +1097,7 @@ bodies/titles/comments. Uses `anthropics/claude-code-action@v1`. One-time
 repo setup required: `ANTHROPIC_API_KEY` secret + enable Actions PR-creation
 permission.
 
-## [DONE - 2026-04-05] [Infra] Claude Code project config
+## [SHIPPED - 2026-04-05] [Infra] Claude Code project config
 
 **Shipped.** `CLAUDE.md` at repo root (architecture map, venv path, roadmap
 pointer, update protocol) + `.claude/settings.json` hooks: scoped ruff
@@ -984,7 +1105,7 @@ auto-fix on edited `.py` files (via `.claude/hooks/ruff-edited.sh`), pytest on
 Stop. Ruff target bumped `py311 → py312` to match the f-string syntax already
 in use. First run auto-fixed 11 pre-existing lint issues.
 
-## [DONE - 2026-04-05] [Feature] MCP Server
+## [SHIPPED - 2026-04-05] [Feature] MCP Server
 
 **Shipped.** FastMCP server over stdio exposing 6 tools
 (`critique`, `wcag`, `components`, `handoff`, `fix`, `compare`) and the
@@ -993,7 +1114,7 @@ in use. First run auto-fixed 11 pre-existing lint issues.
 tests + path-traversal guard. Usable from any MCP client (Claude Code, Cursor,
 Windsurf).
 
-## [DONE - 2026-04-05] [Feature] Auto-Fix Generation
+## [SHIPPED - 2026-04-05] [Feature] Auto-Fix Generation
 
 **Shipped.** `design-intel fix --url X` emits CSS/HTML patches for
 deterministic WCAG failures: colour-adjusted contrast rules (binary-search
@@ -1004,3 +1125,11 @@ landmarks, heading hierarchy, form labels. Non-deterministic failures (e.g.
 12 unit tests + dedicated benchmark (100/100: coverage, contrast accuracy,
 target-size accuracy, HTML snippet validity, determinism discipline,
 selector quality).
+
+---
+
+## Shipped Archive
+
+*Items shipped or verified. Never removed. Move items here when Backlog exceeds ~2,000 lines and items >90 days old.*
+
+*(no items archived yet, Backlog is under 2,000 lines)*

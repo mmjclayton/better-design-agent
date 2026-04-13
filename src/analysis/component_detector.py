@@ -18,6 +18,11 @@ class ComponentScore:
     issues: list[str] = field(default_factory=list)
     strengths: list[str] = field(default_factory=list)
 
+    def __post_init__(self):
+        # Clamp score to [0, max_score]. Protects the report from arithmetic
+        # bugs in per-component scorers that could produce negative values.
+        self.score = max(0, min(self.score, self.max_score))
+
 
 @dataclass
 class ComponentReport:
@@ -49,7 +54,8 @@ class ComponentReport:
         lines.append("|-----------|------|-------|--------|")
         for c in sorted(self.components, key=lambda x: x.score / max(x.max_score, 1)):
             pct = round(c.score / c.max_score * 100) if c.max_score else 0
-            lines.append(f"| {c.name} | {c.type} | {c.score}/{c.max_score} ({pct}%) | {len(c.issues)} issues |")
+            issue_label = "issue" if len(c.issues) == 1 else "issues"
+            lines.append(f"| {c.name} | {c.type} | {c.score}/{c.max_score} ({pct}%) | {len(c.issues)} {issue_label} |")
         lines.append("")
 
         # Detail per component
@@ -65,6 +71,35 @@ class ComponentReport:
                 lines.append("\n**Strengths:**")
                 for s in c.strengths:
                     lines.append(f"- {s}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def to_pragmatic_markdown(self, threshold: int = 60) -> str:
+        """High-signal component report: only components below threshold %."""
+        below = [
+            c for c in self.components
+            if (c.score / max(c.max_score, 1) * 100) < threshold
+        ]
+        lines = [
+            "## Components — Pragmatic View\n",
+            f"**{len(below)}/{len(self.components)} components below {threshold}%** "
+            f"— these are the ones worth attention.\n",
+        ]
+        if not below:
+            lines.append(f"All components score at or above {threshold}%. Nothing flagged.")
+            return "\n".join(lines)
+
+        for c in sorted(below, key=lambda x: x.score / max(x.max_score, 1)):
+            pct = round(c.score / c.max_score * 100) if c.max_score else 0
+            lines.append(f"### {c.name} ({c.type}) — {c.score}/{c.max_score} ({pct}%)\n")
+            lines.append(f"Selector: `{c.selector}`\n")
+            if c.issues:
+                lines.append("**Top issues:**")
+                for issue in c.issues[:5]:
+                    lines.append(f"- {issue}")
+                if len(c.issues) > 5:
+                    lines.append(f"- … +{len(c.issues) - 5} more")
             lines.append("")
 
         return "\n".join(lines)
@@ -103,10 +138,10 @@ def _score_navigation(nav_data: dict, interactive: list, dom_data: dict) -> Comp
         all_pass = all(e.get("meets_touch_target", False) for e in nav_elements)
         if all_pass:
             score += 2
-            strengths.append("All nav items meet 44px touch target")
+            strengths.append("All nav items meet 44px target size")
         else:
             failing = [e for e in nav_elements if not e.get("meets_touch_target")]
-            issues.append(f"{len(failing)} nav items below 44px touch target")
+            issues.append(f"{len(failing)} nav items below 44px target size")
 
     # Focus and hover styles (from Playwright state tests — ground truth)
     state_tests = dom_data.get("state_tests", [])
@@ -161,25 +196,29 @@ def _score_forms(dom_data: dict) -> ComponentScore | None:
 
     total_inputs = len(form_elements)
     unlabelled = len(unlabelled_inputs) + len(unlabelled_selects)
-    labelled = total_inputs - unlabelled
+    # `unlabelled` counts every form input on the page (including hidden ones),
+    # while `total_inputs` counts only visible interactive inputs. Clamp so the
+    # labelled count can't go negative when the page has hidden inputs.
+    labelled = max(0, total_inputs - unlabelled)
 
     # Labels
     if unlabelled == 0:
         score += 4
         strengths.append(f"All {total_inputs} inputs have programmatic labels")
     else:
-        label_pct = labelled / total_inputs if total_inputs else 0
+        label_pct = (labelled / total_inputs) if total_inputs else 0
+        label_pct = max(0.0, min(1.0, label_pct))
         score += round(4 * label_pct)
-        issues.append(f"{unlabelled}/{total_inputs} inputs missing labels")
+        issues.append(f"{unlabelled} form input(s) missing programmatic labels")
 
     # Touch targets
     form_targets = [e for e in form_elements if e.get("meets_touch_target")]
     if len(form_targets) == len(form_elements):
         score += 2
-        strengths.append("All form inputs meet touch target minimum")
+        strengths.append("All form inputs meet 44px target minimum")
     else:
         failing = len(form_elements) - len(form_targets)
-        issues.append(f"{failing} form inputs below 44px touch target")
+        issues.append(f"{failing} form inputs below 44px target size")
 
     # Placeholder-only labelling
     placeholder_only = [i for i in unlabelled_inputs if i.get("placeholder")]
@@ -217,10 +256,10 @@ def _score_buttons(dom_data: dict) -> ComponentScore:
     passing = [b for b in buttons if b.get("meets_touch_target")]
     if len(passing) == len(buttons):
         score += 3
-        strengths.append(f"All {len(buttons)} buttons meet 44px touch target")
+        strengths.append(f"All {len(buttons)} buttons meet 44px target size")
     else:
         failing = len(buttons) - len(passing)
-        issues.append(f"{failing}/{len(buttons)} buttons below 44px touch target")
+        issues.append(f"{failing}/{len(buttons)} buttons below 44px target size")
         score += round(3 * len(passing) / len(buttons))
 
     # Labels
@@ -299,9 +338,9 @@ def _score_content_list(dom_data: dict) -> ComponentScore | None:
     passing = [e for e in list_items if e.get("meets_touch_target")]
     if len(passing) == len(list_items):
         score += 3
-        strengths.append("All list items meet touch target minimum")
+        strengths.append("All list items meet 44px target minimum")
     else:
-        issues.append(f"{len(list_items) - len(passing)} items below 44px touch target")
+        issues.append(f"{len(list_items) - len(passing)} items below 44px target size")
         score += round(3 * len(passing) / len(list_items))
 
     # Labels

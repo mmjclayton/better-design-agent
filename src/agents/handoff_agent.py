@@ -4,7 +4,7 @@ extracted DOM data and visual analysis.
 """
 
 from src.agents.base import BaseAgent
-from src.input.models import DesignInput, InputType
+from src.input.models import DesignInput
 from src.knowledge.retriever import retrieve
 
 
@@ -119,7 +119,7 @@ class HandoffAgent(BaseAgent):
         # Layout
         layout = dom.get("layout", {})
         if layout:
-            parts.append(f"\n## Layout")
+            parts.append("\n## Layout")
             parts.append(f"- Viewport: {layout.get('viewport_width')}x{layout.get('viewport_height')}px")
             parts.append(f"- Body font: {layout.get('body_font_size')} / {layout.get('body_line_height')}")
             parts.append(f"- Font family: {layout.get('body_font_family')}")

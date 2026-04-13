@@ -1,0 +1,43 @@
+# Example user flow for `design-intel flow`.
+#
+# Copy this file, edit for your flow, then run:
+#   design-intel flow --flow flows/signup.yaml --base-url https://your-app.com
+#
+# Schema:
+#   name: string, required
+#   flow_type: signup | checkout | login | onboarding | other (default: other)
+#   steps: list of step objects, required (non-empty)
+#
+# Each step:
+#   name: string, displayed in the report
+#   action: navigate | click | fill | assert_text
+#   selector: CSS selector (required for click + fill)
+#   value: string (required for fill + assert_text)
+#   url: URL path, relative or absolute (required for navigate)
+#   timeout_ms: int, optional (default 10000)
+
+name: Signup happy path
+flow_type: signup
+
+steps:
+  - name: Open signup page
+    action: navigate
+    url: /signup
+
+  - name: Fill email
+    action: fill
+    selector: 'input[name="email"]'
+    value: test@example.com
+
+  - name: Fill password
+    action: fill
+    selector: 'input[name="password"]'
+    value: CorrectHorseBatteryStaple
+
+  - name: Submit form
+    action: click
+    selector: 'button[type="submit"]'
+
+  - name: Confirm success
+    action: assert_text
+    value: "Welcome"

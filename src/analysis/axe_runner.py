@@ -5,7 +5,6 @@ Injects axe-core into the page and runs a full accessibility audit.
 Returns structured results that integrate with our WCAG reporting.
 """
 
-import json
 from dataclasses import dataclass, field
 
 # axe-core CDN URL — pinned version for reproducibility

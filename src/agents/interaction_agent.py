@@ -87,6 +87,26 @@ class InteractionAgent(BaseAgent):
         if context:
             parts.append(f"## Context\n{context}")
 
+        # Viewport context — so recommendations match the device being evaluated
+        layout = design_input.dom_data.get("layout", {})
+        vw = layout.get("viewport_width", 0) if layout else 0
+        vh = layout.get("viewport_height", 0) if layout else 0
+        if vw and vh:
+            is_desktop = vw >= 1024
+            parts.append(
+                f"## Viewport\nReviewing **{'desktop' if is_desktop else 'mobile/tablet'}** "
+                f"viewport ({vw}x{vh}px). "
+                + (
+                    "Focus interaction critique on mouse + keyboard users. "
+                    "Don't speculate about 'desktop users accessing mobile view' — "
+                    "that's not this run's audience."
+                    if not is_desktop else
+                    "Focus interaction critique on mouse + keyboard + pointer users. "
+                    "Touch-target sizing (44x44px) is a mobile convention — apply it "
+                    "loosely here; mouse users don't need 44px targets."
+                )
+            )
+
         # State test results
         states = design_input.dom_data.get("state_tests", [])
         if states:

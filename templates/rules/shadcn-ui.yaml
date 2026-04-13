@@ -1,0 +1,46 @@
+# Brand rules for shadcn/ui + Tailwind CSS projects.
+#
+# shadcn/ui uses CSS custom properties for theming on top of Tailwind.
+# This template validates that the required design tokens are present.
+#
+# Usage: copy to .design-intel/rules.yaml or run `design-intel init --framework shadcn`
+
+version: 1
+
+allowed_fonts:
+  - Inter
+  - ui-sans-serif
+  - system-ui
+  - Geist
+  - Geist Mono
+
+# shadcn/ui default palette (light theme) — HSL values converted to hex.
+# Replace with your actual theme values from globals.css.
+allowed_colours:
+  text:
+    - "#000000"
+    - "#0a0a0a"   # foreground
+    - "#737373"   # muted-foreground
+    - "#ffffff"
+  background:
+    - "#ffffff"   # background
+    - "#f5f5f5"   # muted
+    - "#e5e5e5"   # border
+    - "#fafafa"   # card
+    - "#0a0a0a"   # primary
+
+min_font_size: 14
+
+# shadcn/ui CSS custom properties — these must be defined in globals.css
+required_tokens:
+  - --background
+  - --foreground
+  - --primary
+  - --primary-foreground
+  - --secondary
+  - --muted
+  - --accent
+  - --border
+  - --radius
+
+forbidden_tokens: []

@@ -1,4 +1,5 @@
 .env
+.env.local
 __pycache__/
 *.pyc
 *.pyo
@@ -13,3 +14,11 @@ output/
 node_modules/
 .venv/
 venv/
+
+# Private agent management files (Agent SOP, not for public release)
+CLAUDE.md
+docs/agent-memory.md
+docs/build-plans/
+docs/feature-map.md
+.claude/
+project_resume.md

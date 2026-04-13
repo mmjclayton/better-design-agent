@@ -1,0 +1,58 @@
+# Design review gate — fails the build if design-intel detects regressions or
+# violations above the configured thresholds. Drop this into
+# .github/workflows/ in the repo you want to protect.
+#
+# Default mode is **pragmatic**: grandfathers pre-existing violations and
+# only fails the build on NEW critical/serious issues introduced by the PR,
+# or a WCAG score drop > 2pp. Pass `--strict` to switch to zero-tolerance.
+#
+# Before use:
+#   1. Set DESIGN_REVIEW_URL below to a reachable preview/staging URL.
+#   2. (Optional) tune thresholds — see the design-intel ci --help for the
+#      full flag set: --strict, --min-score, --severity, --score-tolerance.
+#   3. (Optional) gate on specific paths if design-intel only needs to run on
+#      frontend PRs (see `paths:` filter in the `on:` block).
+
+name: Design Review
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  design-review:
+    runs-on: ubuntu-latest
+    env:
+      DESIGN_REVIEW_URL: https://preview.example.com
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install design-intel
+        run: |
+          pip install design-intelligence
+          playwright install --with-deps chromium
+
+      - name: Run CI gate (pragmatic mode by default)
+        id: gate
+        run: |
+          design-intel ci \
+            --url "$DESIGN_REVIEW_URL" \
+            --format json > design-review.json
+        # To switch to zero-tolerance gating, add: --strict
+        # To add a hard score floor:               --min-score 70
+        # To tune the severity floor:              --severity critical
+        # To widen the score-noise band:           --score-tolerance 5.0
+        continue-on-error: false
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: design-review-report
+          path: design-review.json

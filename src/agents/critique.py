@@ -178,8 +178,22 @@ def _format_dom_data(dom_data: dict) -> str:
     # Layout
     layout = dom_data.get("layout", {})
     if layout:
+        vw = layout.get("viewport_width", 0)
+        vh = layout.get("viewport_height", 0)
+        is_desktop = vw >= 1024
+        viewport_kind = "DESKTOP" if is_desktop else "MOBILE/TABLET"
         sections.append("### Page Layout")
-        sections.append(f"- Viewport: {layout.get('viewport_width', '?')}x{layout.get('viewport_height', '?')}px")
+        sections.append(
+            f"- Viewport: {vw}x{vh}px ({viewport_kind})"
+        )
+        if is_desktop:
+            sections.append(
+                "- **Viewport guidance:** this is a desktop viewport. Touch-target "
+                "findings (WCAG 2.5.8, sub-24px/44px) apply less stringently because "
+                "mouse/trackpad users have sub-pixel precision. Flag touch-target "
+                "issues only if they'd also hurt mouse users (e.g. <8x8px targets), "
+                "not as critical accessibility failures on a desktop-only run."
+            )
         sections.append(f"- Base font: {layout.get('body_font_size', '?')} / {layout.get('body_line_height', '?')}")
         sections.append(f"- Font family: {layout.get('body_font_family', '?')}")
         sections.append(f"- Body background: `{layout.get('body_bg', '?')}`")
@@ -653,16 +667,30 @@ Specific positives you can observe.
 """
 
 
+PRAGMATIC_MODE_INSTRUCTION = """\
+
+## Pragmatic mode
+This run is in PRAGMATIC mode. Output focused, high-signal findings only:
+- List at most 3–5 findings per section. Rank by Nielsen severity (0–4).
+- Only report findings with severity ≥ 2 (serious usability problem or worse).
+- Skip AAA criteria and aspirational polish — they're not the top priority.
+- Skip minor spacing nits, micro-typography opinions, and "consider" findings.
+- If a section has no severity ≥ 2 findings, write one line: "No serious issues."
+- Each finding must name a concrete, implementable fix, not a general principle.
+"""
+
+
 class CritiqueAgent(BaseAgent):
-    def __init__(self, tone: str = "opinionated"):
+    def __init__(self, tone: str = "opinionated", pragmatic: bool = False):
         self.tone = tone
+        self.pragmatic = pragmatic
         self._screenshot_only = False
 
     def system_prompt(self) -> str:
         tone_instruction = CRITIQUE_TONE_VARIANTS.get(self.tone, CRITIQUE_TONE_VARIANTS["opinionated"])
-        if self._screenshot_only:
-            return f"{SCREENSHOT_ONLY_PROMPT}\n\nTone: {tone_instruction}"
-        return f"{CRITIQUE_SYSTEM_PROMPT}\n\nTone: {tone_instruction}"
+        base = SCREENSHOT_ONLY_PROMPT if self._screenshot_only else CRITIQUE_SYSTEM_PROMPT
+        pragmatic_suffix = PRAGMATIC_MODE_INSTRUCTION if self.pragmatic else ""
+        return f"{base}\n\nTone: {tone_instruction}{pragmatic_suffix}"
 
     def get_image_paths(self, design_input: DesignInput) -> list[str]:
         """Return screenshots from all crawled pages."""

@@ -20,7 +20,26 @@ from src.analysis.history import (
 from src.knowledge.index import build_index
 from src.output.formatter import save_report
 
-app = typer.Typer(name="design-intel", help="Design Intelligence Agent", invoke_without_command=True)
+def _get_version() -> str:
+    """Read the installed package version."""
+    try:
+        from importlib.metadata import version as pkg_version
+        return pkg_version("design-intelligence")
+    except Exception:
+        return "0.0.0-dev"
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"design-intel {_get_version()}")
+        raise typer.Exit(0)
+
+
+app = typer.Typer(
+    name="design-intel",
+    help="Design Intelligence Agent",
+    invoke_without_command=True,
+)
 console = Console()
 
 
@@ -66,7 +85,14 @@ def _friendly_exit(exc: BaseException, exit_code: int = 2) -> None:
 
 
 @app.callback()
-def _default_entry(ctx: typer.Context) -> None:
+def _default_entry(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        False, "--version", "-V",
+        callback=_version_callback, is_eager=True,
+        help="Print version and exit.",
+    ),
+) -> None:
     """Launch the guided wizard when no subcommand is given."""
     if ctx.invoked_subcommand is None:
         from src.cli_wizard import run_wizard
@@ -1303,17 +1329,31 @@ def autopilot(
         console.print(f"Action log: {log_path}")
 
 
+FRAMEWORK_TEMPLATES = {
+    "tailwind": "tailwind-default.yaml",
+    "material": "material-design.yaml",
+    "bootstrap": "bootstrap.yaml",
+    "shadcn": "shadcn-ui.yaml",
+}
+
+
 @app.command()
 def init(
     force: bool = typer.Option(
         False, "--force", "-f",
         help="Overwrite existing files instead of preserving them.",
     ),
+    framework: Optional[str] = typer.Option(
+        None, "--framework",
+        help=f"Copy brand rules for a framework: {', '.join(FRAMEWORK_TEMPLATES.keys())}",
+    ),
 ):
     """First-run bootstrap — creates .env, .design-intel/, and a project
     config template in the current directory.
 
     Safe to re-run: existing files are left alone unless --force is set.
+    Use --framework to pre-populate .design-intel/rules.yaml with
+    framework-specific brand rules (tailwind, material, bootstrap, shadcn).
     """
     from pathlib import Path as _Path
     from src.project_config import EXAMPLE_CONFIG, CONFIG_RELATIVE
@@ -1361,6 +1401,27 @@ def init(
     output_dir = cwd / "output"
     output_dir.mkdir(exist_ok=True)
     actions.append(("output/", "ready"))
+
+    # Framework brand rules template
+    if framework:
+        template_name = FRAMEWORK_TEMPLATES.get(framework)
+        if not template_name:
+            console.print(
+                f"[red]Unknown framework: {framework}. "
+                f"Options: {', '.join(FRAMEWORK_TEMPLATES.keys())}[/red]"
+            )
+            raise typer.Exit(2)
+        rules_path = intel_dir / "rules.yaml"
+        if rules_path.exists() and not force:
+            actions.append((".design-intel/rules.yaml", "exists, left alone"))
+        else:
+            template_src = _Path(__file__).parent.parent / "templates" / "rules" / template_name
+            if template_src.exists():
+                rules_path.write_text(template_src.read_text())
+                actions.append((".design-intel/rules.yaml", f"created from {framework} template"))
+            else:
+                console.print(f"[yellow]Template {template_name} not found at {template_src}[/yellow]")
+                actions.append((".design-intel/rules.yaml", "template not found"))
 
     # Print the summary
     console.print("\n[bold]design-intel init[/bold] — bootstrapping this project\n")
@@ -2083,6 +2144,207 @@ def compare(
     if save:
         path = save_report(result, "compare")
         console.print(f"\nSaved to {path}")
+
+
+@app.command()
+def check(
+    url: str = typer.Argument(..., help="URL to score"),
+    threshold: Optional[float] = typer.Option(
+        None, "--threshold", "-t",
+        help="Minimum score — exit 1 if overall score is below this value.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    device: Optional[str] = typer.Option(
+        None, "--device",
+        help=f"Device preset: {', '.join(DEVICE_PRESETS.keys())}",
+    ),
+):
+    """Quick design quality score — one line, no LLM, instant result.
+
+    Prints a single score line to stdout. Pipe-friendly: all status output
+    goes to stderr.  Use --threshold for CI gates (exit 0 if pass, 1 if fail).
+
+    Examples:
+        design-intel check https://example.com
+        design-intel check https://example.com --threshold 80
+        design-intel check https://example.com --json | jq .
+    """
+    import json as json_mod
+    from src.analysis.ui_review import run_ui_review
+
+    stderr_con = Console(stderr=True)
+
+    vw, vh = 1440, 900
+    if device:
+        preset = DEVICE_PRESETS.get(device)
+        if not preset:
+            stderr_con.print(
+                f"[red]Unknown device: {device}. "
+                f"Options: {', '.join(DEVICE_PRESETS.keys())}[/red]"
+            )
+            raise typer.Exit(2)
+        vw, vh = preset["width"], preset["height"]
+
+    try:
+        with stderr_con.status("Capturing..."):
+            design_input = process_input(url=url, viewport_width=vw, viewport_height=vh)
+    except Exception as exc:
+        _friendly_exit(exc)
+
+    with stderr_con.status("Scoring..."):
+        report = run_ui_review(design_input.dom_data)
+
+    # Build category summary
+    cat_scores = {c.name: round(c.score) for c in report.categories}
+
+    if json_output:
+        output = json_mod.dumps({
+            "url": url,
+            "score": report.overall_score,
+            "categories": cat_scores,
+        }, indent=2)
+        typer.echo(output)
+    else:
+        parts = " ".join(f"{k}:{v}" for k, v in cat_scores.items())
+        typer.echo(f"{url} {report.overall_score}/100 ({parts})")
+
+    if threshold is not None and report.overall_score < threshold:
+        stderr_con.print(
+            f"[red]Score {report.overall_score} below threshold {threshold}[/red]"
+        )
+        raise typer.Exit(1)
+
+
+@app.command()
+def version():
+    """Print version and runtime environment info."""
+    import sys
+    import platform
+
+    ver = _get_version()
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+
+    pw_ver = "not installed"
+    try:
+        from importlib.metadata import version as pkg_version
+        pw_ver = pkg_version("playwright")
+    except Exception:
+        pass
+
+    console.print(f"design-intel {ver}")
+    console.print(f"Python {py_ver} ({platform.platform()})")
+    console.print(f"Playwright {pw_ver}")
+
+
+@app.command()
+def doctor():
+    """Check environment setup and diagnose common problems."""
+    import sys
+    import shutil
+    import os
+    from pathlib import Path
+
+    stderr_con = Console(stderr=True)
+    all_ok = True
+
+    def _ok(label: str, detail: str = "") -> None:
+        suffix = f" ({detail})" if detail else ""
+        stderr_con.print(f"  [green][ok][/green]  {label}{suffix}")
+
+    def _warn(label: str, detail: str = "") -> None:
+        nonlocal all_ok
+        all_ok = False
+        suffix = f" ({detail})" if detail else ""
+        stderr_con.print(f"  [yellow][warn][/yellow] {label}{suffix}")
+
+    def _fail(label: str, detail: str = "") -> None:
+        nonlocal all_ok
+        all_ok = False
+        suffix = f" ({detail})" if detail else ""
+        stderr_con.print(f"  [red][fail][/red] {label}{suffix}")
+
+    stderr_con.print("\n[bold]design-intel doctor[/bold]\n")
+
+    # Python version
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    if sys.version_info >= (3, 11):
+        _ok("Python", py_ver)
+    else:
+        _fail("Python", f"{py_ver} — requires >= 3.11")
+
+    # Package version
+    ver = _get_version()
+    _ok("design-intel", ver)
+
+    # Playwright
+    try:
+        from importlib.metadata import version as pkg_version
+        pw_ver = pkg_version("playwright")
+        _ok("Playwright", pw_ver)
+    except Exception:
+        _fail("Playwright", "not installed — run: pip install playwright")
+
+    # Chromium browser
+    chromium_path = shutil.which("chromium") or shutil.which("chromium-browser")
+    try:
+        # Playwright manages its own browsers — check if installed
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "--dry-run"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if "chromium" in result.stdout.lower() or result.returncode == 0:
+            _ok("Chromium", "managed by Playwright")
+        else:
+            _warn("Chromium", "may not be installed — run: playwright install chromium")
+    except Exception:
+        if chromium_path:
+            _ok("Chromium", chromium_path)
+        else:
+            _warn("Chromium", "run: playwright install chromium")
+
+    # API keys
+    api_keys = {
+        "ANTHROPIC_API_KEY": "Anthropic (Claude)",
+        "OPENAI_API_KEY": "OpenAI",
+        "GEMINI_API_KEY": "Google Gemini",
+    }
+    found_any = False
+    for key, label in api_keys.items():
+        if os.environ.get(key):
+            _ok(f"API key: {label}", f"${key} set")
+            found_any = True
+
+    if not found_any:
+        _warn(
+            "No LLM API key found",
+            "set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY for LLM features",
+        )
+
+    # .design-intel directory
+    config_dir = Path(".design-intel")
+    if config_dir.exists():
+        _ok(".design-intel/", "project config directory found")
+    else:
+        _warn(".design-intel/", "not found — run: design-intel init")
+
+    # Network check
+    try:
+        import httpx
+        resp = httpx.head("https://example.com", timeout=5, follow_redirects=True)
+        _ok("Network", f"example.com reachable (HTTP {resp.status_code})")
+    except Exception as exc:
+        _warn("Network", f"cannot reach example.com — {exc}")
+
+    stderr_con.print()
+    if all_ok:
+        stderr_con.print("[green bold]All checks passed.[/green bold]\n")
+    else:
+        stderr_con.print(
+            "[yellow]Some checks need attention. "
+            "Fix the warnings above and re-run.[/yellow]\n"
+        )
+        raise typer.Exit(1)
 
 
 @app.command()

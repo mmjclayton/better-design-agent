@@ -1,0 +1,43 @@
+# Example brand rules for `design-intel brand-check`.
+#
+# Copy this file to .design-intel/rules.yaml at the root of any project you
+# want to validate. Only include the sections you care about — every rule
+# type is optional and skipped when not configured.
+
+version: 1
+
+# Font families that are allowed to appear on the site. Matches against the
+# first family in each declaration's stack ("Inter, sans-serif" → "Inter").
+# Case-insensitive substring match.
+allowed_fonts:
+  - Inter
+  - Menlo
+
+# Hex colours that are allowed in each context. Accepts #fff and #ffffff.
+# Colours are normalised to lowercase 6-digit hex before comparison.
+allowed_colours:
+  text:
+    - "#111111"
+    - "#333333"
+    - "#666666"
+  background:
+    - "#ffffff"
+    - "#f5f5f5"
+    - "#111111"
+
+# Minimum font size (px) that text can use. Smaller sizes are flagged.
+min_font_size: 14
+
+# CSS custom properties that MUST be defined on the site. Names are matched
+# verbatim (including the leading --).
+required_tokens:
+  - --color-brand-primary
+  - --space-sm
+  - --space-md
+  - --font-sans
+
+# CSS custom properties that MUST NOT be defined (for ripping out legacy
+# tokens during a migration).
+forbidden_tokens:
+  - --legacy-blue
+  - --old-spacing-unit

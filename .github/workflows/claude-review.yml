@@ -1,0 +1,53 @@
+# Claude Code PR/issue review.
+#
+# Triggers when a human @mentions "@claude" in a PR comment, issue comment,
+# new issue body, or PR review. Claude reads the diff + CLAUDE.md, runs the
+# requested task (review, fix, explain, open a follow-up PR), and posts back.
+#
+# One-time setup (repo owner, outside this file):
+#   1. Add a repo secret named ANTHROPIC_API_KEY with a valid key.
+#   2. In repo Settings → Actions → General, enable "Allow GitHub Actions to
+#      create and approve pull requests" so Claude can open follow-up PRs.
+#   3. Verify the action version below matches the latest release at
+#      https://github.com/anthropics/claude-code-action/releases — bump if
+#      a newer major is out.
+#
+# After that, this workflow is zero-touch — every @claude mention in the repo
+# runs it.
+
+name: Claude Review
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened, assigned]
+
+jobs:
+  claude:
+    # Only fire when a comment/issue actually contains "@claude".
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}

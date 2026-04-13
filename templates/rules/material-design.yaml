@@ -1,0 +1,41 @@
+# Brand rules for Material Design / MUI projects.
+#
+# Based on Material Design 3 defaults. Validates that your site uses the MD3
+# type scale, color system, and spacing conventions.
+#
+# Usage: copy to .design-intel/rules.yaml or run `design-intel init --framework material`
+
+version: 1
+
+# Material Design default font
+allowed_fonts:
+  - Roboto
+  - Roboto Mono
+  - Google Sans
+  - system-ui
+
+# MD3 baseline color tokens — replace with your actual theme
+allowed_colours:
+  text:
+    - "#000000"
+    - "#1c1b1f"   # on-surface
+    - "#49454f"   # on-surface-variant
+    - "#1d1b20"   # on-background
+    - "#ffffff"
+  background:
+    - "#ffffff"
+    - "#fffbfe"   # surface
+    - "#f4eff4"   # surface-variant
+    - "#e7e0ec"   # surface-container
+    - "#1c1b1f"   # inverse-surface
+
+# MD3 minimum body text size
+min_font_size: 14
+
+# MD3 design tokens (if using CSS custom properties)
+required_tokens:
+  - --md-sys-color-primary
+  - --md-sys-color-on-primary
+  - --md-sys-typescale-body-large-font
+
+forbidden_tokens: []

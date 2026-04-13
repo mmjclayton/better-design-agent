@@ -1,0 +1,36 @@
+# Design review gate for GitLab CI/CD.
+#
+# Fails the pipeline if design-intel detects regressions or violations above
+# the configured thresholds. Drop this into .gitlab-ci.yml or include it.
+#
+# Default mode is **pragmatic**: grandfathers pre-existing violations and
+# only fails on NEW critical/serious issues introduced by the MR.
+#
+# Before use:
+#   1. Set DESIGN_REVIEW_URL to a reachable preview/staging URL.
+#   2. (Optional) tune thresholds — see `design-intel ci --help`.
+#   3. Store any required API keys in CI/CD variables (Settings > CI/CD > Variables).
+
+design-review:
+  stage: test
+  image: python:3.12-slim
+  variables:
+    DESIGN_REVIEW_URL: https://preview.example.com
+  before_script:
+    - pip install design-intelligence
+    - playwright install --with-deps chromium
+  script:
+    - |
+      design-intel ci \
+        --url "$DESIGN_REVIEW_URL" \
+        --format json > design-review.json
+    # To switch to zero-tolerance: add --strict
+    # To add a hard score floor:    add --min-score 70
+    # To tune severity:             add --severity critical
+  artifacts:
+    when: always
+    paths:
+      - design-review.json
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"

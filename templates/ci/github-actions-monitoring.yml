@@ -1,0 +1,70 @@
+# Weekly design-quality monitoring — runs design-intel against a URL on a
+# schedule and posts to Slack on regression. Drop this into .github/workflows/
+# in any repo you want to monitor.
+#
+# Before use:
+#   1. Set MONITOR_URL below to the URL you want to track.
+#   2. (Optional) add SLACK_WEBHOOK_URL as a repo secret for alerts.
+#   3. Tune the cron schedule in the `on:` block — default is weekly Monday 09:00 UTC.
+#   4. Adjust --severity / --score-tolerance / --trend-window to taste.
+#
+# The workflow persists history as a commit artefact so trends accumulate
+# across runs.
+
+name: Design Quality Monitor
+
+on:
+  schedule:
+    # Weekly on Monday at 09:00 UTC
+    - cron: "0 9 * * 1"
+  workflow_dispatch:  # manual trigger
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    env:
+      MONITOR_URL: https://example.com
+    steps:
+      - name: Checkout (for history persistence)
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install design-intel
+        run: |
+          pip install design-intelligence
+          playwright install --with-deps chromium
+
+      - name: Run monitor
+        id: monitor
+        continue-on-error: true  # Let the workflow complete even on regression.
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          WEBHOOK_FLAG=""
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            WEBHOOK_FLAG="--alert-webhook $SLACK_WEBHOOK_URL"
+          fi
+          design-intel monitor \
+            --url "$MONITOR_URL" \
+            --format json \
+            --trend-window 12 \
+            $WEBHOOK_FLAG > monitor-report.json
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: design-quality-monitor
+          path: |
+            monitor-report.json
+            .design-intel/
+
+      - name: Fail the job if regression detected
+        if: steps.monitor.outcome == 'failure'
+        run: |
+          echo "Design quality regression detected — see monitor-report.json"
+          exit 1

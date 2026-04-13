@@ -1,0 +1,48 @@
+# Brand rules for Tailwind CSS projects.
+#
+# Validates that your site uses Tailwind's default design tokens: the 4px
+# spacing scale, the default color palette weights, and system/sans fonts.
+# Customise to match your tailwind.config.js.
+#
+# Usage: copy to .design-intel/rules.yaml or run `design-intel init --framework tailwind`
+
+version: 1
+
+# Tailwind default font stack — adjust to match your config
+allowed_fonts:
+  - ui-sans-serif
+  - system-ui
+  - Inter
+  - ui-monospace
+  - SFMono-Regular
+
+# Tailwind's default palette covers these common grays + brand colors.
+# Replace with your actual theme colors from tailwind.config.js.
+allowed_colours:
+  text:
+    - "#000000"
+    - "#111827"   # gray-900
+    - "#1f2937"   # gray-800
+    - "#374151"   # gray-700
+    - "#4b5563"   # gray-600
+    - "#6b7280"   # gray-500
+    - "#9ca3af"   # gray-400
+    - "#ffffff"
+  background:
+    - "#ffffff"
+    - "#f9fafb"   # gray-50
+    - "#f3f4f6"   # gray-100
+    - "#e5e7eb"   # gray-200
+    - "#d1d5db"   # gray-300
+    - "#111827"   # gray-900
+    - "#000000"
+
+# Tailwind default minimum is 12px (text-xs) — set to your team's floor
+min_font_size: 12
+
+# Require Tailwind CSS custom properties if using @theme or CSS variable mode
+required_tokens:
+  - --color-primary
+  - --font-sans
+
+forbidden_tokens: []

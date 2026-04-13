@@ -70,11 +70,27 @@ class WcagReport:
         }
 
     def to_markdown(self) -> str:
+        # Separate A/AA (compliance-blocking) from AAA (aspirational) so the
+        # summary headline doesn't conflate them.
+        aa_fails = [r for r in self.results
+                    if r.status == "fail" and r.level in ("A", "AA")]
+        aaa_fails = [r for r in self.results
+                     if r.status == "fail" and r.level == "AAA"]
+        aa_violation_count = sum(r.count for r in aa_fails)
+        aaa_violation_count = sum(r.count for r in aaa_fails)
+
+        summary = (
+            f"**Score: {self.score_percentage}%** (A/AA only) — "
+            f"{self.pass_count} pass, {len(aa_fails)} fail, "
+            f"{self.warning_count} warning; "
+            f"{aa_violation_count} A/AA violation(s)"
+        )
+        if aaa_fails:
+            summary += f"; {aaa_violation_count} AAA aspirational"
+
         lines = [
             "## WCAG 2.2 Automated Audit\n",
-            f"**Score: {self.score_percentage}%** "
-            f"({self.pass_count} pass, {self.fail_count} fail, "
-            f"{self.warning_count} warning, {self.total_violations} total violations)\n",
+            summary + "\n",
         ]
 
         # Failures — separated by level
@@ -99,7 +115,8 @@ class WcagReport:
                         if key not in seen:
                             seen.add(key)
                             unique.append(v)
-                    lines.append(f"\n**{r.criterion}** violations ({len(unique)} unique elements):")
+                    noun = "element" if len(unique) == 1 else "elements"
+                    lines.append(f"\n**{r.criterion}** violations ({len(unique)} unique {noun}):")
                     for v in unique[:10]:
                         lines.append(f"- {_format_violation(v)}")
             lines.append("")
@@ -132,6 +149,49 @@ class WcagReport:
                 lines.append(f"| {r.criterion} | {r.level} | {r.details} |")
             lines.append("")
 
+        return "\n".join(lines)
+
+    def to_pragmatic_markdown(self) -> str:
+        """High-signal WCAG report: only A/AA failures + their violations.
+
+        Drops passes, warnings, AAA criteria, and na rows. Designed for
+        ad-hoc "what should I fix?" reviews rather than full audits.
+        """
+        aa_failures = [
+            r for r in self.results
+            if r.status == "fail" and r.level in ("A", "AA")
+        ]
+        lines = [
+            "## WCAG — Pragmatic View\n",
+            f"**Score: {self.score_percentage}%** "
+            f"({len(aa_failures)} A/AA failures shown, other rows hidden)\n",
+        ]
+        if not aa_failures:
+            lines.append("No A/AA failures — nothing to fix.")
+            return "\n".join(lines)
+
+        lines.append("| Criterion | Level | Violations | Details |")
+        lines.append("|-----------|-------|------------|---------|")
+        for r in aa_failures:
+            lines.append(f"| {r.criterion} | {r.level} | {r.count} | {r.details} |")
+        lines.append("")
+
+        for r in aa_failures:
+            if not r.violations:
+                continue
+            # Deduplicate violations by element
+            seen = set()
+            unique = []
+            for v in r.violations:
+                key = v.get("element", "") + "|" + v.get("issue", v.get("size", ""))
+                if key not in seen:
+                    seen.add(key)
+                    unique.append(v)
+            lines.append(f"\n**{r.criterion}** ({len(unique)} unique):")
+            for v in unique[:5]:
+                lines.append(f"- {_format_violation(v)}")
+            if len(unique) > 5:
+                lines.append(f"- … +{len(unique) - 5} more")
         return "\n".join(lines)
 
 
@@ -237,27 +297,28 @@ def check_target_size(dom_data: dict) -> WcagResult:
                 "element": e.get("element", "?"),
                 "text": e.get("text", "")[:30],
                 "size": f"{w}x{h}px",
-                "issue": f"Below 24x24px minimum",
+                "issue": "Below 24x24px minimum",
             })
         elif w < 44 or h < 44:
             warnings_44.append({
                 "element": e.get("element", "?"),
                 "text": e.get("text", "")[:30],
                 "size": f"{w}x{h}px",
-                "issue": f"Below 44x44px recommended",
+                "issue": "Below 44x44px recommended",
             })
 
     if violations_24:
+        # Don't mention 44px here — 2.5.5 (AAA) has its own row. Conflating
+        # them in the AA detail makes readers double-count.
         return WcagResult(
             "2.5.8 Target Size (Minimum)", "AA", "fail",
-            f"{len(violations_24)} elements below 24x24px, {len(warnings_44)} below 44px recommended",
+            f"{len(violations_24)} elements below 24x24px minimum",
             count=len(violations_24), violations=violations_24,
         )
     if warnings_44:
         return WcagResult(
-            "2.5.8 Target Size (Minimum)", "AA", "warning",
-            f"All elements meet 24px AA minimum, but {len(warnings_44)} below 44px recommended",
-            count=0, violations=warnings_44,
+            "2.5.8 Target Size (Minimum)", "AA", "pass",
+            f"All {len(interactive)} elements meet 24x24px AA minimum",
         )
     return WcagResult(
         "2.5.8 Target Size (Minimum)", "AA", "pass",
@@ -414,6 +475,7 @@ def check_form_labels(dom_data: dict) -> WcagResult:
     forms = html.get("forms", {})
     unlabelled_inputs = forms.get("inputs_without_labels", [])
     unlabelled_selects = forms.get("selects_without_labels", [])
+    breakdown = forms.get("label_breakdown", {}) or {}
 
     violations = []
     for inp in unlabelled_inputs:
@@ -428,10 +490,28 @@ def check_form_labels(dom_data: dict) -> WcagResult:
             "issue": f"Select has no label (first option: \"{sel.get('first_option', '?')}\")",
         })
 
+    def _breakdown_summary() -> str:
+        parts = []
+        if breakdown.get("with_label_element", 0):
+            parts.append(f"{breakdown['with_label_element']} use <label>")
+        if breakdown.get("with_aria_label", 0):
+            parts.append(f"{breakdown['with_aria_label']} use aria-label")
+        if breakdown.get("with_aria_labelledby", 0):
+            parts.append(f"{breakdown['with_aria_labelledby']} use aria-labelledby")
+        if breakdown.get("with_title", 0):
+            parts.append(f"{breakdown['with_title']} use title attr (weak)")
+        if breakdown.get("unlabelled", 0):
+            parts.append(f"{breakdown['unlabelled']} unlabelled")
+        return "; ".join(parts) if parts else ""
+
     if violations:
+        summary = _breakdown_summary()
+        detail = f"{len(violations)} form inputs without programmatic labels"
+        if summary:
+            detail = f"{detail} (labelling breakdown: {summary})"
         return WcagResult(
             "4.1.2 Name, Role, Value (Form Labels)", "A", "fail",
-            f"{len(violations)} form inputs without programmatic labels",
+            detail,
             count=len(violations), violations=violations,
         )
 
@@ -444,9 +524,12 @@ def check_form_labels(dom_data: dict) -> WcagResult:
     if not has_inputs:
         return WcagResult("4.1.2 Name, Role, Value (Form Labels)", "A", "na", "No form inputs found")
 
+    summary = _breakdown_summary()
+    detail = "All form inputs have programmatic labels"
+    if summary:
+        detail = f"{detail} ({summary})"
     return WcagResult(
-        "4.1.2 Name, Role, Value (Form Labels)", "A", "pass",
-        "All form inputs have programmatic labels",
+        "4.1.2 Name, Role, Value (Form Labels)", "A", "pass", detail,
     )
 
 
@@ -461,10 +544,17 @@ def check_focus_visible(dom_data: dict) -> WcagResult:
     focus_tested = [s for s in state_tests if s.get("has_focus_state")]
 
     if has_global_fv:
-        rule_desc = ", ".join(r.get("selector", "?") for r in fv_rules[:3])
+        rule_desc = ", ".join(
+            r.get("selector", "?") for r in fv_rules[:3]
+            if r.get("selector")
+        )
+        detail = (
+            f"Global :focus-visible rules found ({rule_desc})"
+            if rule_desc
+            else "Global :focus-visible rules detected in stylesheets"
+        )
         return WcagResult(
-            "2.4.7 Focus Visible", "AA", "pass",
-            f"Global :focus-visible rules found ({rule_desc})",
+            "2.4.7 Focus Visible", "AA", "pass", detail,
         )
 
     if focus_tested:
