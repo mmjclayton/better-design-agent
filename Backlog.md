@@ -22,6 +22,27 @@ Items ordered: In Progress > Blocked > Open > Shipped (most recent first).
 
 ---
 
+## [SHIPPED - 2026-04-13] [Infra] Launch readiness — README rewrite, repo rename, naming unification
+
+**Summary.** Pre-launch preparation for tomorrow's traffic. README cut from
+1,113 to 497 lines (removed duplication, collapsed per-feature deep dives,
+fixed lede). GitHub repo renamed from `better-design-agent` to `design-intel`
+via `gh repo rename` (auto-redirect preserves old links). All product
+references unified to `design-intel`. Agent-sop project files (CLAUDE.md,
+docs/agent-memory.md, docs/build-plans/, docs/feature-map.md, .claude/) added
+to .gitignore as private; tracked separately, never pushed to public repo.
+
+**Acceptance criteria.**
+1. README accurately reflects all benchmark numbers (verified against table); no fabricated claims.
+2. WCAG criteria count corrected: 11 checks across 10 criteria (was '11 criteria' with a 10-row table).
+3. All 637 tests pass.
+4. No `better-design-agent` or `Better Design Agent` references in tracked files.
+5. Repo renamed via `gh repo rename design-intel`.
+6. Private agent-sop files confirmed gitignored, none in public history.
+7. MIT LICENSE present, .env gitignored, no secrets in committed files.
+
+---
+
 ## [SHIPPED - 2026-04-08] [Feature] Quick Score Command — design-intel check
 
 **Summary.** Zero-config, no-LLM command that prints a single design quality
