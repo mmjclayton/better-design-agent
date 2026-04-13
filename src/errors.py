@@ -178,7 +178,7 @@ def friendly_error(exc: BaseException) -> FriendlyError:
         next_action=(
             "Look at the original error below for clues. If it's not "
             "obvious, open an issue at "
-            "github.com/mmjclayton/better-design-agent with this message."
+            "github.com/mmjclayton/design-intel with this message."
         ),
         original=_truncate(msg),
     )

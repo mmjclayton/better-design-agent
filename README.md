@@ -59,7 +59,7 @@ Not trying to replace an LLM. Designed to sit *between* a website and an LLM, ca
 
 ```bash
 # 1. Install (Python 3.11+)
-git clone https://github.com/mmjclayton/better-design-agent.git design-intel
+git clone https://github.com/mmjclayton/design-intel.git
 cd design-intel
 python3 -m venv .venv
 .venv/bin/pip install -e .
